@@ -174,7 +174,7 @@
     <div class="seg">
       <button id="tabTF" class="active">Trailforks</button>
       <button id="tabGM">Google</button>
-      <button id="tabCombined">Combined</button>
+      <button id="tabCombined">OSM</button>
     </div>
     <button class="btn" id="filterBtn">Filters</button>
     <button class="btn" id="osmToggle" title="Public campsites from OpenStreetMap for the visible area">OSM: OFF</button>
@@ -183,8 +183,7 @@
   </header>
 
   <div id="tfBar" class="subbar">
-    <input id="tfRid" placeholder="rid…" style="width:70px" title="Trailforks region ID — trails render at every zoom when set">
-    <a href="https://www.trailforks.com/widgets/config/region_map/" target="_blank" title="Pick your region, then copy rid=NUMBER from that page's URL">find</a>
+    <button class="btn" id="tfInteract">Tap trails: OFF</button>
     <select id="tfBasemap" title="Trailforks basemap">
       <option value="trailforks">Topo</option>
       <option value="trailforks-streets">Streets</option>
@@ -221,8 +220,9 @@
       <option value="0">All</option>
     </select>
     <button class="btn" id="tfLayersBtn">Layers ▾</button>
-    <button class="btn" id="tfInteract">Tap trails: OFF</button>
     <span id="tfSyncBadge">⟳</span>
+    <input id="tfRid" placeholder="rid…" style="width:70px" title="Trailforks region ID — trails render at every zoom when set">
+    <a href="https://www.trailforks.com/widgets/config/region_map/" target="_blank" title="Pick your region, then copy rid=NUMBER from that page's URL">find</a>
   </div>
 
   <div id="gmBar" class="subbar">
