@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1e2a32">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+<title>Trails + Camps</title>
+<link rel="stylesheet" href="lib/leaflet.min.css">
+<script src="lib/leaflet.min.js"></script>
+<script src="lib/pako_inflate.min.js"></script>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overscroll-behavior: none; }
+  #app { display: flex; flex-direction: column; height: 100%; }
+
+  header {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: calc(env(safe-area-inset-top, 0px) + 8px) 10px 8px;
+    background: #1e2a32; color: #fff; z-index: 1200; user-select: none; -webkit-user-select: none;
+  }
+  header h1 { font-size: 16px; margin: 0 4px 0 0; font-weight: 600; }
+  .seg { display: flex; border-radius: 7px; overflow: hidden; border: 1px solid #46606f; }
+  .seg button {
+    background: transparent; color: #cfe3ee; border: 0; padding: 8px 11px;
+    cursor: pointer; font-size: 13px; min-height: 36px;
+  }
+  .seg button.active { background: #fec200; color: #1e2a32; font-weight: 600; }
+  .btn {
+    background: #34495e; color: #fff; border: 1px solid #46606f; border-radius: 7px;
+    padding: 8px 12px; font-size: 13px; cursor: pointer; min-height: 36px;
+  }
+  .btn.primary { background: #fec200; color: #1e2a32; border-color: #fec200; font-weight: 600; }
+  #searchBox {
+    padding: 8px 10px; border-radius: 7px; border: 1px solid #46606f;
+    background: #2b3d49; color: #fff; font-size: 16px; flex: 1; min-width: 110px; min-height: 36px;
+  }
+  #searchBox::placeholder { color: #8fa6b3; }
+  #placeCount { font-size: 11px; color: #9fb7c4; width: 100%; }
+
+  #main { flex: 1; display: flex; position: relative; min-height: 0; }
+
+  /* Sidebar (filters) — slide-over drawer */
+  #sidebarBackdrop {
+    position: absolute; inset: 0; z-index: 1400; background: rgba(0,0,0,.35); display: none;
+  }
+  #sidebarBackdrop.open { display: block; }
+  #sidebar {
+    position: absolute; top: 0; bottom: 0; left: 0; width: 82%; max-width: 320px;
+    background: #f4f6f7; border-right: 1px solid #d8dee1;
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
+    padding: 12px 12px calc(env(safe-area-inset-bottom, 0px) + 12px);
+    z-index: 1500; transform: translateX(-105%); transition: transform .22s ease;
+  }
+  #sidebar.open { transform: translateX(0); }
+  #sidebar h3 { font-size: 12px; text-transform: uppercase; color: #667; margin: 4px 0 8px; }
+  .cat-row { display: flex; align-items: center; gap: 8px; padding: 7px 2px; font-size: 14px; cursor: pointer; }
+  .cat-row input { width: 18px; height: 18px; }
+  .cat-row .dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; border: 1px solid rgba(0,0,0,.25); }
+  .cat-row .cnt { margin-left: auto; color: #889; font-size: 12px; }
+  .sidebar-actions { display: flex; gap: 6px; margin-bottom: 8px; }
+  .sidebar-actions button { flex: 1; font-size: 13px; padding: 8px 4px; cursor: pointer; border: 1px solid #c6ced2; background: #fff; border-radius: 6px; min-height: 36px; }
+  #dataInfo { font-size: 11px; color: #99a; margin-top: 14px; line-height: 1.5; }
+
+  /* Map panes */
+  #viewCombined, #viewTF, #viewGM { position: absolute; inset: 0; }
+  #viewTF, #viewGM { display: none; }
+  #mapMain { position: absolute; inset: 0; }
+
+  /* TF / GM views: iframe underneath, transparent leaflet on top */
+  #tfFrames, #gmFrames {
+    position: absolute; inset: 0; transform-origin: 50% 50%;
+    will-change: transform;
+  }
+  .tf-frame {
+    position: absolute; left: -25%; top: -25%; width: 150%; height: 150%;
+    border: 0; opacity: 0; transition: opacity .25s;
+    pointer-events: none;
+  }
+  .tf-frame.shown { opacity: 1; pointer-events: auto; }
+  .tf-frame.fit { left: 0; top: 0; width: 100%; height: 100%; }
+  #mapTF, #mapGM { position: absolute; inset: 0; background: transparent !important; }
+  #mapTF.pass-through, #mapGM.pass-through { pointer-events: none; }
+  #mapTF .leaflet-tile-pane, #mapGM .leaflet-tile-pane { display: none; }
+
+  #tfCrosshair, #gmCrosshair {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    pointer-events: none; z-index: 900; opacity: .55; font-size: 18px; color: #1e2a32;
+    text-shadow: 0 0 3px #fff;
+  }
+  #tfToolbar, #gmToolbar {
+    position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+    background: rgba(30,42,50,.92); color: #fff; border-radius: 8px; padding: 6px 10px;
+    display: flex; align-items: center; gap: 8px; z-index: 1000; font-size: 12px;
+    flex-wrap: wrap; justify-content: center; max-width: 96%;
+  }
+  #tfToolbar .btn, #gmToolbar .btn { padding: 6px 9px; font-size: 12px; min-height: 32px; }
+  #tfToolbar select, #gmToolbar select {
+    background: #2b3d49; color: #fff; border: 1px solid #46606f;
+    border-radius: 4px; font-size: 13px; padding: 4px; min-height: 30px;
+  }
+  #tfToolbar input { font-size: 16px; }
+  #tfLayersPanel {
+    display: none; position: absolute; top: 130%; left: 0; z-index: 1600;
+    background: rgba(30,42,50,.97); border: 1px solid #46606f; border-radius: 8px;
+    padding: 8px 12px; white-space: nowrap; text-align: left;
+  }
+  #tfLayersPanel.open { display: block; }
+  #tfLayersPanel label { display: block; font-size: 13px; padding: 5px 0; cursor: pointer; }
+  #tfLayersPanel input { width: 16px; height: 16px; vertical-align: middle; }
+  #tfSyncBadge, #gmSyncBadge { color: #fec200; display: none; }
+  #tfHint {
+    position: absolute; bottom: calc(env(safe-area-inset-bottom, 0px) + 20px); left: 50%; transform: translateX(-50%);
+    background: rgba(254,194,0,.95); color: #1e2a32; border-radius: 8px; padding: 7px 14px;
+    z-index: 1000; font-size: 13px; font-weight: 600; display: none; text-align: center; max-width: 92%;
+  }
+  .mtb-boost { filter: saturate(1.9) contrast(1.15); }
+
+  /* Locate-me button */
+  .locate-ctl {
+    background: #fff; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
+    font-size: 19px; cursor: pointer; border-radius: 4px;
+  }
+  /* bigger leaflet zoom buttons for touch */
+  .leaflet-touch .leaflet-bar a { width: 34px; height: 34px; line-height: 34px; }
+
+  .leaflet-popup-content { font-size: 14px; margin: 10px 14px; }
+  .leaflet-popup-content .pcat { display: inline-block; padding: 1px 7px; border-radius: 9px; color: #fff; font-size: 11px; margin-bottom: 4px; }
+  .leaflet-popup-content .pdesc { max-height: 150px; overflow-y: auto; -webkit-overflow-scrolling: touch; white-space: pre-wrap; color: #445; }
+
+  #toast {
+    position: fixed; bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); left: 50%; transform: translateX(-50%);
+    z-index: 3000; background: #1e2a32; color: #fff;
+    padding: 10px 16px; border-radius: 8px; font-size: 13px; display: none; max-width: 88%;
+  }
+
+  /* Boot / loading overlay */
+  #loading {
+    position: fixed; inset: 0; z-index: 4000; background: #1e2a32; color: #fff;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  }
+  #loading .logo { font-size: 46px; }
+  #loading .msg { font-size: 14px; color: #9fb7c4; }
+  #loadBar { width: 220px; height: 6px; background: #34495e; border-radius: 3px; overflow: hidden; }
+  #loadBar > div { height: 100%; width: 0; background: #fec200; transition: width .3s; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>🚵🏕️</h1>
+    <div class="seg">
+      <button id="tabCombined" class="active">Combined</button>
+      <button id="tabTF">Trailforks</button>
+      <button id="tabGM">Google</button>
+    </div>
+    <button class="btn" id="filterBtn">Filters</button>
+    <button class="btn" id="osmToggle" title="Public campsites from OpenStreetMap for the visible area">OSM: OFF</button>
+    <input id="searchBox" placeholder="Search place…" autocomplete="off">
+    <span id="placeCount"></span>
+  </header>
+
+  <div id="main">
+    <div id="sidebarBackdrop"></div>
+    <div id="sidebar">
+      <h3>Categories</h3>
+      <div class="sidebar-actions">
+        <button id="catAll">All</button>
+        <button id="catNone">None</button>
+      </div>
+      <div id="catList"></div>
+      <div id="dataInfo"></div>
+    </div>
+
+    <div style="position:relative; flex:1;">
+      <div id="viewCombined">
+        <div id="mapMain"></div>
+      </div>
+
+      <div id="viewTF">
+        <div id="tfFrames">
+          <iframe id="tfFrameA" class="tf-frame" title="Trailforks map"></iframe>
+          <iframe id="tfFrameB" class="tf-frame" title="Trailforks map"></iframe>
+        </div>
+        <div id="mapTF"></div>
+        <div id="tfCrosshair">✛</div>
+        <div id="tfToolbar">
+          <label title="Trailforks region ID — trails render at every zoom when set">rid
+            <input id="tfRid" placeholder="rid…" style="width:74px">
+          </label>
+          <a href="https://www.trailforks.com/widgets/config/region_map/" target="_blank" style="color:#fec200" title="Pick your region, then copy rid=NUMBER from that page's URL">find</a>
+          <span id="tfSyncBadge">⟳</span>
+          <button class="btn" id="tfInteract">Tap trails: OFF</button>
+          <select id="tfBasemap" title="Trailforks basemap">
+            <option value="trailforks">Topo</option>
+            <option value="trailforks-streets">Streets</option>
+            <option value="trailforks-dark">Dark</option>
+            <option value="satellite">Satellite</option>
+            <option value="hybrid">Hybrid</option>
+            <option value="arc-world_imagery">Arc Imagery</option>
+            <option value="osm">OSM</option>
+          </select>
+          <select id="tfTrailstyle" title="How trails are colored">
+            <option value="difficulty">Difficulty</option>
+            <option value="status">Status</option>
+            <option value="condition">Condition</option>
+            <option value="random">Colors</option>
+            <option value="popularity">Popularity</option>
+          </select>
+          <select id="tfActivity" title="Activity type">
+            <option value="1">MTB</option>
+            <option value="2">E-Bike</option>
+            <option value="19">Gravel</option>
+            <option value="18">Adaptive</option>
+            <option value="17">Fat Bike</option>
+            <option value="9">Horse</option>
+            <option value="6">Hike</option>
+            <option value="5">Trail Run</option>
+            <option value="7">Moto</option>
+            <option value="14">Trials</option>
+            <option value="8">ATV/OHV</option>
+            <option value="15">Snowmobile</option>
+            <option value="10">Snowshoe</option>
+            <option value="11">DH Ski</option>
+            <option value="12">BC Ski</option>
+            <option value="13">Nordic</option>
+            <option value="0">All</option>
+          </select>
+          <span style="position:relative">
+            <button class="btn" id="tfLayersBtn">Layers ▾</button>
+            <span id="tfLayersPanel">
+              <label><input type="checkbox" value="trail"> Trail heads</label>
+              <label><input type="checkbox" value="labels" checked> Trail labels</label>
+              <label><input type="checkbox" value="route"> Routes</label>
+              <label><input type="checkbox" value="photo"> Photos</label>
+              <label><input type="checkbox" value="poi" checked> POIs</label>
+              <label><input type="checkbox" value="polygon" checked> Polygons</label>
+              <label><input type="checkbox" value="directory" checked> Places</label>
+              <label><input type="checkbox" value="region" checked> Regions</label>
+              <label><input type="checkbox" value="winter"> Winter only</label>
+            </span>
+          </span>
+        </div>
+        <div id="tfHint"></div>
+      </div>
+
+      <div id="viewGM">
+        <div id="gmFrames">
+          <iframe id="gmFrameA" class="tf-frame" title="Google map"></iframe>
+          <iframe id="gmFrameB" class="tf-frame" title="Google map"></iframe>
+        </div>
+        <div id="mapGM"></div>
+        <div id="gmCrosshair">✛</div>
+        <div id="gmToolbar">
+          <select id="gmBasemap" title="Google basemap">
+            <option value="m">Map</option>
+            <option value="k">Satellite</option>
+            <option value="h">Hybrid</option>
+          </select>
+          <span id="gmSyncBadge">⟳</span>
+          <button class="btn" id="gmInteract">Interact: OFF</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+<div id="loading">
+  <div class="logo">🚵 🏕️</div>
+  <div class="msg" id="loadMsg">Loading places…</div>
+  <div id="loadBar"><div></div></div>
+</div>
+
+<script>
+"use strict";
+
+/* ---------------- state ----------------
+   places: array of compact records [name, lat, lng, category, desc, dateVerified] */
+var places = [];
+var activeCats = null;               // Set of enabled categories (null = all)
+var DATA_VERSION = "iOverlander export 2026-07";
+var DATA_FILES = ["data/usa.json.gz", "data/canada.json.gz", "data/mexico.json.gz"];
+var VIEW_KEY = "tc_view_v1", CATS_KEY = "tc_cats_v1", POS_KEY = "tc_pos_v1";
+var P_NAME = 0, P_LAT = 1, P_LNG = 2, P_CAT = 3, P_DESC = 4, P_DATE = 5;
+
+var CAT_COLORS = {
+  "wild camping": "#2e8b57",
+  "informal campsite": "#7cb342",
+  "established campground": "#00796b",
+  "water": "#1976d2",
+  "showers": "#8e24aa",
+  "laundromat": "#ab47bc",
+  "sanitation dump station": "#8d6e63",
+  "mechanic and parts": "#f57c00",
+  "fuel station": "#e53935",
+  "propane": "#d84315",
+  "wifi": "#00acc1",
+  "restaurant": "#c2185b",
+  "warning": "#d32f2f",
+  "checkpoint": "#5d4037",
+  "tourist attraction": "#3949ab",
+  "short-term parking": "#607d8b",
+  "hotel": "#6a1b9a",
+  "overnight prohibited": "#b71c1c"
+};
+var PALETTE = ["#546e7a","#26a69a","#ef6c00","#5c6bc0","#9ccc65","#ec407a","#78909c","#7e57c2"];
+function catColor(cat) {
+  var k = (cat || "other").toLowerCase();
+  if (CAT_COLORS[k]) return CAT_COLORS[k];
+  var h = 0; for (var i = 0; i < k.length; i++) h = (h * 31 + k.charCodeAt(i)) >>> 0;
+  return PALETTE[h % PALETTE.length];
+}
+
+/* ---------------- bundled data loading ---------------- */
+function setLoad(msg, frac) {
+  document.getElementById("loadMsg").textContent = msg;
+  document.querySelector("#loadBar > div").style.width = Math.round(frac * 100) + "%";
+}
+function loadBundledData() {
+  var i = 0;
+  function next() {
+    if (i >= DATA_FILES.length) return Promise.resolve();
+    var f = DATA_FILES[i];
+    setLoad("Loading " + f.replace(/^data\/|\.json\.gz$/g, "").toUpperCase() + "…", i / DATA_FILES.length);
+    return fetch(f)
+      .then(function (r) { if (!r.ok) throw new Error(f + " " + r.status); return r.arrayBuffer(); })
+      .then(function (buf) {
+        var txt = pako.inflate(new Uint8Array(buf), { to: "string" });
+        var arr = JSON.parse(txt);
+        for (var j = 0; j < arr.length; j++) places.push(arr[j]);
+        i++;
+        return next();
+      });
+  }
+  return next();
+}
+
+/* ---------------- maps ---------------- */
+var mapMain = L.map("mapMain", { zoomControl: true }).setView([44.5, -110.0], 5);
+var baseOSM = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19, attribution: "© OpenStreetMap contributors"
+});
+var baseTopo = L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", {
+  maxZoom: 17, attribution: "© OpenTopoMap (CC-BY-SA), © OpenStreetMap"
+});
+var baseCyclo = L.tileLayer("https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png", {
+  maxZoom: 19, attribution: "CyclOSM © OpenStreetMap contributors"
+});
+var baseSat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+  maxZoom: 19, attribution: "Imagery © Esri"
+});
+var mtbOverlay = L.tileLayer("https://tile.waymarkedtrails.org/mtb/{z}/{x}/{y}.png", {
+  maxZoom: 18, attribution: "MTB routes © waymarkedtrails.org (CC-BY-SA)", opacity: 1, className: "mtb-boost"
+});
+baseCyclo.addTo(mapMain);
+mtbOverlay.addTo(mapMain);
+L.control.layers(
+  { "CyclOSM (all trails)": baseCyclo, "OpenStreetMap": baseOSM, "OpenTopoMap": baseTopo, "Satellite": baseSat },
+  { "MTB routes (Waymarked)": mtbOverlay }
+).addTo(mapMain);
+
+var mapTF = L.map("mapTF", { zoomControl: true, attributionControl: false }).setView(mapMain.getCenter(), mapMain.getZoom());
+var mapGM = L.map("mapGM", { zoomControl: true, attributionControl: false }).setView(mapMain.getCenter(), mapMain.getZoom());
+
+var rendererMain = L.canvas({ padding: 0.4 });
+var rendererTF = L.canvas({ padding: 0.4 });
+var rendererGM = L.canvas({ padding: 0.4 });
+var markersMain = L.layerGroup().addTo(mapMain);
+var markersTF = L.layerGroup().addTo(mapTF);
+var markersGM = L.layerGroup().addTo(mapGM);
+var currentView = "combined";
+
+/* locate-me control (all maps) */
+var locLayers = [];
+function locateMe() {
+  if (!navigator.geolocation) return toast("Location not available.");
+  toast("Finding you…");
+  navigator.geolocation.getCurrentPosition(function (pos) {
+    var ll = [pos.coords.latitude, pos.coords.longitude];
+    var m = activeMap();
+    m.setView(ll, Math.max(m.getZoom(), 13));
+    locLayers.forEach(function (l) { l.remove(); });
+    locLayers = [];
+    [mapMain, mapTF, mapGM].forEach(function (mm) {
+      locLayers.push(L.circleMarker(ll, { radius: 8, color: "#fff", weight: 2, fillColor: "#1976d2", fillOpacity: 1 }).addTo(mm));
+      locLayers.push(L.circle(ll, { radius: pos.coords.accuracy, color: "#1976d2", weight: 1, fillOpacity: 0.08 }).addTo(mm));
+    });
+    if (currentView === "tf") syncTF(true);
+    if (currentView === "gm") syncGM(true);
+  }, function () {
+    toast("Couldn't get location — check Location permission in Settings.");
+  }, { enableHighAccuracy: true, timeout: 12000 });
+}
+function addLocateCtl(map) {
+  var ctl = L.control({ position: "topleft" });
+  ctl.onAdd = function () {
+    var d = L.DomUtil.create("div", "leaflet-bar");
+    var a = L.DomUtil.create("a", "locate-ctl", d);
+    a.href = "#"; a.textContent = "◎"; a.title = "My location";
+    L.DomEvent.on(a, "click", function (e) { L.DomEvent.stop(e); locateMe(); });
+    return d;
+  };
+  ctl.addTo(map);
+}
+addLocateCtl(mapMain);
+addLocateCtl(mapTF);
+addLocateCtl(mapGM);
+
+function popupHtml(p) {
+  var c = catColor(p[P_CAT]);
+  var q = encodeURIComponent(p[P_NAME]);
+  return '<div><span class="pcat" style="background:' + c + '">' + esc(p[P_CAT]) + "</span>" +
+    "<div><b>" + esc(p[P_NAME]) + "</b></div>" +
+    (p[P_DATE] ? '<div style="font-size:11px;color:#789;">verified ' + esc(p[P_DATE]) + "</div>" : "") +
+    (p[P_DESC] ? '<div class="pdesc">' + esc(p[P_DESC]) + "</div>" : "") +
+    '<div style="margin-top:6px;font-size:12px;">' + p[P_LAT].toFixed(5) + ", " + p[P_LNG].toFixed(5) +
+    '<br><a href="https://maps.apple.com/?ll=' + p[P_LAT] + "," + p[P_LNG] + "&q=" + q + '">Apple Maps</a>' +
+    ' · <a href="https://www.google.com/maps?q=' + p[P_LAT] + "," + p[P_LNG] + '">Google Maps</a></div></div>';
+}
+function esc(s) {
+  return String(s || "").replace(/[&<>"]/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+  });
+}
+
+/* Smart viewport loading (spatial grid + zoom gate + render buffer) */
+var MIN_PIN_ZOOM = 5;
+var MAX_RENDER = 4000;
+var CELL = 0.5;
+var grid = {};
+function rebuildGrid() {
+  grid = {};
+  for (var i = 0; i < places.length; i++) {
+    var p = places[i];
+    var k = Math.floor(p[P_LAT] / CELL) + "_" + Math.floor(p[P_LNG] / CELL);
+    (grid[k] || (grid[k] = [])).push(p);
+  }
+}
+function collectInBounds(b) {
+  var out = [];
+  var s = Math.floor(b.getSouth() / CELL), n = Math.floor(b.getNorth() / CELL);
+  var w = Math.floor(b.getWest() / CELL), e = Math.floor(b.getEast() / CELL);
+  for (var y = s; y <= n; y++) {
+    for (var x = w; x <= e; x++) {
+      var cell = grid[y + "_" + x];
+      if (!cell) continue;
+      for (var i = 0; i < cell.length; i++) {
+        var p = cell[i];
+        if (activeCats && !activeCats.has(p[P_CAT])) continue;
+        if (p[P_LAT] < b.getSouth() || p[P_LAT] > b.getNorth() || p[P_LNG] < b.getWest() || p[P_LNG] > b.getEast()) continue;
+        out.push(p);
+        if (out.length > MAX_RENDER) return out;
+      }
+    }
+  }
+  return out;
+}
+function visibleMapState() {
+  if (currentView === "tf") return { map: mapTF, group: markersTF, renderer: rendererTF };
+  if (currentView === "gm") return { map: mapGM, group: markersGM, renderer: rendererGM };
+  return { map: mapMain, group: markersMain, renderer: rendererMain };
+}
+function activeMap() { return visibleMapState().map; }
+function renderMarkers(force) {
+  var st = visibleMapState();
+  var map = st.map;
+  if (!map._tc) map._tc = { bounds: null };
+  var status = document.getElementById("placeCount");
+
+  if (map.getZoom() < MIN_PIN_ZOOM) {
+    if (map._tc.bounds !== null || force) { st.group.clearLayers(); map._tc.bounds = null; }
+    status.textContent = places.length
+      ? places.length.toLocaleString() + " pins — zoom in to load them"
+      : "";
+    return;
+  }
+  var view = map.getBounds();
+  if (!force && map._tc.bounds && map._tc.bounds.contains(view)) return;
+
+  var buffered = view.pad(0.6);
+  var list = collectInBounds(buffered);
+  st.group.clearLayers();
+  var truncated = list.length > MAX_RENDER;
+  var n = truncated ? MAX_RENDER : list.length;
+  for (var i = 0; i < n; i++) {
+    (function (p) {
+      st.group.addLayer(L.circleMarker([p[P_LAT], p[P_LNG]], {
+        renderer: st.renderer, radius: 7, weight: 1.5, color: "#fff",
+        fillColor: catColor(p[P_CAT]), fillOpacity: 0.92
+      }).bindPopup(function () { return popupHtml(p); }));
+    })(list[i]);
+  }
+  map._tc.bounds = truncated ? null : buffered;
+  status.textContent = n.toLocaleString() + " loaded / " + places.length.toLocaleString() + " pins" + (truncated ? " (zoom in for all)" : "");
+}
+var renderMoveTimer = null;
+function renderOnMove() {
+  clearTimeout(renderMoveTimer);
+  renderMoveTimer = setTimeout(function () { renderMarkers(false); }, 200);
+}
+mapMain.on("moveend zoomend", renderOnMove);
+mapTF.on("moveend zoomend", renderOnMove);
+mapGM.on("moveend zoomend", renderOnMove);
+
+/* remember last map position between launches */
+function savePos() {
+  try {
+    var m = activeMap();
+    var c = m.getCenter();
+    localStorage.setItem(POS_KEY, JSON.stringify([c.lat, c.lng, m.getZoom()]));
+  } catch (e) {}
+}
+mapMain.on("moveend zoomend", savePos);
+mapTF.on("moveend zoomend", savePos);
+mapGM.on("moveend zoomend", savePos);
+
+/* ---------------- OSM camping layer (Overpass, needs network) ---------------- */
+var osmCampsOn = false;
+var osmCamps = {};
+var osmLayerMain = L.layerGroup();
+var osmLayerTF = L.layerGroup();
+var osmLayerGM = L.layerGroup();
+var osmFetchTimer = null, osmLastBounds = null, osmFetching = false;
+var OSM_MIN_ZOOM = 9;
+
+function osmCampColor(tags) {
+  if (tags.backcountry === "yes" || tags.tents === "yes" && tags.fee === "no") return "#2e7d32";
+  if (tags.tourism === "caravan_site") return "#6a1b9a";
+  return "#43a047";
+}
+function osmPopup(el) {
+  var t = el.tags || {};
+  var name = t.name || (t.tourism === "caravan_site" ? "Caravan/RV site" : "Campsite");
+  var bits = [];
+  if (t.backcountry === "yes") bits.push("backcountry");
+  if (t.fee) bits.push("fee: " + t.fee);
+  if (t.access) bits.push("access: " + t.access);
+  if (t.capacity) bits.push("capacity: " + t.capacity);
+  var lat = el.lat, lng = el.lon;
+  return '<div><span class="pcat" style="background:#43a047">OSM · ' + esc(t.tourism || "camp_site") + "</span>" +
+    "<div><b>" + esc(name) + "</b></div>" +
+    (bits.length ? '<div class="pdesc">' + esc(bits.join(" · ")) + "</div>" : "") +
+    (t.website ? '<div><a href="' + esc(t.website) + '">website</a></div>' : "") +
+    '<div style="margin-top:5px;font-size:11px;">' + lat.toFixed(5) + ", " + lng.toFixed(5) +
+    ' · <a href="https://maps.apple.com/?ll=' + lat + "," + lng + '">Apple Maps</a>' +
+    ' · <a href="https://www.openstreetmap.org/' + el.type + "/" + el.id + '">OSM</a></div></div>';
+}
+function renderOsmMarkers() {
+  osmLayerMain.clearLayers();
+  osmLayerTF.clearLayers();
+  osmLayerGM.clearLayers();
+  var n = 0;
+  Object.keys(osmCamps).forEach(function (k) {
+    var el = osmCamps[k];
+    var style = { radius: 7, weight: 2, color: "#1b5e20", fillColor: osmCampColor(el.tags || {}), fillOpacity: 0.9 };
+    osmLayerMain.addLayer(L.circleMarker([el.lat, el.lon], Object.assign({ renderer: rendererMain }, style)).bindPopup(osmPopup(el)));
+    osmLayerTF.addLayer(L.circleMarker([el.lat, el.lon], Object.assign({ renderer: rendererTF }, style)).bindPopup(osmPopup(el)));
+    osmLayerGM.addLayer(L.circleMarker([el.lat, el.lon], Object.assign({ renderer: rendererGM }, style)).bindPopup(osmPopup(el)));
+    n++;
+  });
+  document.getElementById("osmToggle").textContent = osmCampsOn ? "OSM: " + n : "OSM: OFF";
+}
+function fetchOsmCamps(showToasts) {
+  if (!osmCampsOn || osmFetching) return;
+  var m = activeMap();
+  if (m.getZoom() < OSM_MIN_ZOOM) {
+    if (showToasts) toast("Zoom in (level " + OSM_MIN_ZOOM + "+) to load OSM campsites.");
+    return;
+  }
+  var b = m.getBounds();
+  if (osmLastBounds && osmLastBounds.contains(b)) return;
+  var q = "[out:json][timeout:25];nwr[\"tourism\"~\"^(camp_site|caravan_site)$\"](" +
+    b.getSouth().toFixed(5) + "," + b.getWest().toFixed(5) + "," +
+    b.getNorth().toFixed(5) + "," + b.getEast().toFixed(5) + ");out center 1500;";
+  osmFetching = true;
+  fetch("https://overpass-api.de/api/interpreter", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: "data=" + encodeURIComponent(q)
+  }).then(function (r) {
+    if (!r.ok) throw new Error("overpass " + r.status);
+    return r.json();
+  }).then(function (data) {
+    osmFetching = false;
+    osmLastBounds = b;
+    var added = 0;
+    (data.elements || []).forEach(function (el) {
+      if (el.type !== "node" && el.center) { el.lat = el.center.lat; el.lon = el.center.lon; }
+      if (typeof el.lat !== "number" || typeof el.lon !== "number") return;
+      var key = el.type + el.id;
+      if (!osmCamps[key]) { osmCamps[key] = el; added++; }
+    });
+    renderOsmMarkers();
+    if (showToasts) toast("Loaded " + added + " new OSM campsites 🏕️");
+  }).catch(function () {
+    osmFetching = false;
+    if (showToasts) toast("OSM server busy or offline — try again later.");
+  });
+}
+document.getElementById("osmToggle").addEventListener("click", function () {
+  osmCampsOn = !osmCampsOn;
+  if (osmCampsOn) {
+    osmLayerMain.addTo(mapMain);
+    osmLayerTF.addTo(mapTF);
+    osmLayerGM.addTo(mapGM);
+    renderOsmMarkers();
+    fetchOsmCamps(true);
+  } else {
+    mapMain.removeLayer(osmLayerMain);
+    mapTF.removeLayer(osmLayerTF);
+    mapGM.removeLayer(osmLayerGM);
+    this.textContent = "OSM: OFF";
+  }
+});
+function osmMoveHandler() {
+  if (!osmCampsOn) return;
+  clearTimeout(osmFetchTimer);
+  osmFetchTimer = setTimeout(function () { fetchOsmCamps(false); }, 1200);
+}
+mapMain.on("moveend zoomend", osmMoveHandler);
+mapTF.on("moveend zoomend", osmMoveHandler);
+mapGM.on("moveend zoomend", osmMoveHandler);
+
+/* ---------------- category sidebar ---------------- */
+function saveCats() {
+  try {
+    localStorage.setItem(CATS_KEY, activeCats ? JSON.stringify(Array.from(activeCats)) : "");
+  } catch (e) {}
+}
+function loadCats() {
+  try {
+    var raw = localStorage.getItem(CATS_KEY);
+    if (raw) activeCats = new Set(JSON.parse(raw));
+  } catch (e) { activeCats = null; }
+}
+function refreshSidebar() {
+  var counts = {};
+  places.forEach(function (p) { counts[p[P_CAT]] = (counts[p[P_CAT]] || 0) + 1; });
+  var cats = Object.keys(counts).sort();
+  var el = document.getElementById("catList");
+  el.innerHTML = "";
+  cats.forEach(function (c) {
+    var row = document.createElement("label");
+    row.className = "cat-row";
+    var on = !activeCats || activeCats.has(c);
+    row.innerHTML = '<input type="checkbox" ' + (on ? "checked" : "") + '>' +
+      '<span class="dot" style="background:' + catColor(c) + '"></span>' +
+      "<span>" + esc(c) + '</span><span class="cnt">' + counts[c].toLocaleString() + "</span>";
+    row.querySelector("input").addEventListener("change", function (e) {
+      if (!activeCats) activeCats = new Set(cats);
+      if (e.target.checked) activeCats.add(c); else activeCats.delete(c);
+      saveCats();
+      renderMarkers(true);
+    });
+    el.appendChild(row);
+  });
+  document.getElementById("dataInfo").textContent =
+    places.length.toLocaleString() + " places bundled · " + DATA_VERSION + " · USA, Canada, Mexico";
+}
+function refreshAll() { rebuildGrid(); refreshSidebar(); renderMarkers(true); }
+
+/* ---------------- Trailforks sync (double-buffered, live transform) ---------------- */
+var tfWrap = document.getElementById("tfFrames");
+var tfFrames = [document.getElementById("tfFrameA"), document.getElementById("tfFrameB")];
+var tfBadge = document.getElementById("tfSyncBadge");
+var tfHint = document.getElementById("tfHint");
+var tfTimer = null, tfHintTimer = null, tfSwapTimer = null;
+var tfShownIdx = -1;
+var tfShown = null;
+var tfPending = null;
+var TF_TRAIL_MIN_ZOOM = 14;
+var TF_ZOOM_OFFSET = -1;
+var RID_KEY = "tc_rid_v1";
+function tfRid() {
+  var raw = document.getElementById("tfRid").value.trim();
+  var m = raw.match(/rid=(\d+)/) || raw.match(/^(\d+)$/);
+  return m ? m[1] : null;
+}
+function updateTfZoomHint() {
+  if (tfRid()) {
+    if (tfHint.textContent.indexOf("zoom in") !== -1) tfHint.style.display = "none";
+    return;
+  }
+  if (mapTF.getZoom() < TF_TRAIL_MIN_ZOOM) {
+    tfHint.textContent = "⚠ Trailforks draws trails at zoom " + TF_TRAIL_MIN_ZOOM + "+ — zoom in (or set a region rid)";
+    tfHint.style.display = "block";
+    clearTimeout(tfHintTimer);
+  }
+  else if (tfHint.textContent.indexOf("zoom in") !== -1) tfHint.style.display = "none";
+}
+function updateTfTransform() {
+  if (!tfShown) return;
+  var size = mapTF.getSize();
+  var P = mapTF.latLngToContainerPoint([tfShown.lat, tfShown.lng]);
+  var s = Math.pow(2, mapTF.getZoom() - tfShown.leafletZ);
+  tfWrap.style.transform = "translate(" + (P.x - size.x / 2).toFixed(1) + "px," +
+    (P.y - size.y / 2).toFixed(1) + "px) scale(" + s.toFixed(4) + ")";
+}
+mapTF.on("move zoom", updateTfTransform);
+
+function tfLayerBoxes() {
+  return Array.prototype.slice.call(document.querySelectorAll("#tfLayersPanel input"));
+}
+function tfWidgetUrl(c, z, wPx, hPx) {
+  var rid = tfRid();
+  var maptype = document.getElementById("tfBasemap").value;
+  var style = document.getElementById("tfTrailstyle").value || "difficulty";
+  var act = document.getElementById("tfActivity").value || "1";
+  var layers = tfLayerBoxes().filter(function (b) { return b.checked; })
+    .map(function (b) { return b.value; }).join(",");
+  var common = "&activitytype=" + act + "&trailstyle=" + style + "&controls=1&dml=1" +
+    "&maptype=" + maptype + "&layers=" + layers +
+    "&lat=" + c.lat.toFixed(6) + "&lon=" + c.lng.toFixed(6) + "&z=" + z;
+  return rid
+    ? "https://www.trailforks.com/widgets/region_map/?rid=" + rid +
+      "&width=" + Math.round(wPx) + "&height=" + Math.round(hPx) + common
+    : "https://www.trailforks.com/widgets/map/?noheader=1" + common;
+}
+var TFPREF_KEY = "tc_tfprefs_v1";
+function saveTfPrefs() {
+  try {
+    localStorage.setItem(TFPREF_KEY, JSON.stringify({
+      basemap: document.getElementById("tfBasemap").value,
+      trailstyle: document.getElementById("tfTrailstyle").value,
+      activity: document.getElementById("tfActivity").value,
+      layers: tfLayerBoxes().filter(function (b) { return b.checked; })
+        .map(function (b) { return b.value; })
+    }));
+  } catch (e) {}
+}
+["tfBasemap", "tfTrailstyle", "tfActivity"].forEach(function (id) {
+  document.getElementById(id).addEventListener("change", function () {
+    saveTfPrefs();
+    syncTF(true);
+  });
+});
+document.getElementById("tfLayersBtn").addEventListener("click", function () {
+  document.getElementById("tfLayersPanel").classList.toggle("open");
+});
+tfLayerBoxes().forEach(function (b) {
+  b.addEventListener("change", function () { saveTfPrefs(); syncTF(true); });
+});
+try {
+  var tfPrefs = JSON.parse(localStorage.getItem(TFPREF_KEY) || "{}");
+  if (tfPrefs.basemap) document.getElementById("tfBasemap").value = tfPrefs.basemap;
+  if (tfPrefs.trailstyle) document.getElementById("tfTrailstyle").value = tfPrefs.trailstyle;
+  if (tfPrefs.activity) document.getElementById("tfActivity").value = tfPrefs.activity;
+  if (Array.isArray(tfPrefs.layers)) {
+    tfLayerBoxes().forEach(function (b) { b.checked = tfPrefs.layers.indexOf(b.value) !== -1; });
+  }
+} catch (e) {}
+function syncTF(immediate) {
+  clearTimeout(tfTimer);
+  tfTimer = setTimeout(function () {
+    var c = mapTF.getCenter();
+    var lz = mapTF.getZoom();
+    var z = Math.max(3, Math.min(18, lz + TF_ZOOM_OFFSET));
+    if (!immediate && tfShown && tfShown.z === z) {
+      var size = mapTF.getSize();
+      var P = mapTF.latLngToContainerPoint([tfShown.lat, tfShown.lng]);
+      var moved = Math.hypot(P.x - size.x / 2, P.y - size.y / 2);
+      if (moved < Math.min(size.x, size.y) * 0.18) return;
+    }
+    tfPending = { lat: c.lat, lng: c.lng, z: z, leafletZ: lz };
+    tfBadge.style.display = "inline";
+    var staging = tfFrames[tfShownIdx === 0 ? 1 : 0];
+    staging.classList.toggle("fit", passThrough);
+    staging.src = tfWidgetUrl(c, z, staging.clientWidth || 800, staging.clientHeight || 600);
+  }, immediate ? 0 : 700);
+}
+tfFrames.forEach(function (frame, idx) {
+  frame.addEventListener("load", function () {
+    if (!tfPending || !frame.src) return;
+    clearTimeout(tfSwapTimer);
+    tfSwapTimer = setTimeout(function () {
+      if (!tfPending) return;
+      tfFrames.forEach(function (f, j) { f.classList.toggle("shown", j === idx); });
+      tfShownIdx = idx;
+      tfShown = tfPending;
+      tfPending = null;
+      updateTfTransform();
+      tfBadge.style.display = "none";
+      if (!tfRid() && mapTF.getZoom() >= TF_TRAIL_MIN_ZOOM) {
+        tfHint.textContent = "⏳ Basemap loaded — trails draw last (20–40 s)";
+        tfHint.style.display = "block";
+        clearTimeout(tfHintTimer);
+        tfHintTimer = setTimeout(function () { tfHint.style.display = "none"; }, 35000);
+      }
+    }, 900);
+  });
+});
+document.getElementById("tfRid").addEventListener("change", function () {
+  try { localStorage.setItem(RID_KEY, this.value.trim()); } catch (e) {}
+  updateTfZoomHint();
+  syncTF(true);
+  toast(tfRid()
+    ? "Region " + tfRid() + " set — trails render at every zoom."
+    : "No region ID recognized — trails only at close zoom.");
+});
+try {
+  var savedRid = localStorage.getItem(RID_KEY);
+  if (savedRid) document.getElementById("tfRid").value = savedRid;
+} catch (e) {}
+
+mapTF.on("moveend zoomend", function () {
+  if (currentView === "tf") {
+    updateTfZoomHint();
+    syncTF(false);
+  }
+});
+
+var passThrough = false;
+document.getElementById("tfInteract").addEventListener("click", function () {
+  passThrough = !passThrough;
+  document.getElementById("mapTF").classList.toggle("pass-through", passThrough);
+  this.textContent = "Tap trails: " + (passThrough ? "ON" : "OFF");
+  syncTF(true);
+  toast(passThrough
+    ? "Tap trails mode — Trailforks is reloading to fit the screen. Wait for ⟳ to clear, then tap trails."
+    : "Pin interaction restored; Trailforks re-synced.");
+});
+
+/* ---------------- Google Maps embed sync ---------------- */
+var gmWrap = document.getElementById("gmFrames");
+var gmFramesArr = [document.getElementById("gmFrameA"), document.getElementById("gmFrameB")];
+var gmBadge = document.getElementById("gmSyncBadge");
+var gmTimer = null, gmSwapTimer = null;
+var gmShownIdx = -1, gmShown = null, gmPending = null;
+var gmPass = false;
+
+function updateGmTransform() {
+  if (!gmShown) return;
+  var size = mapGM.getSize();
+  var P = mapGM.latLngToContainerPoint([gmShown.lat, gmShown.lng]);
+  var s = Math.pow(2, mapGM.getZoom() - gmShown.leafletZ);
+  gmWrap.style.transform = "translate(" + (P.x - size.x / 2).toFixed(1) + "px," +
+    (P.y - size.y / 2).toFixed(1) + "px) scale(" + s.toFixed(4) + ")";
+}
+mapGM.on("move zoom", updateGmTransform);
+
+function gmUrl(c, z) {
+  var t = document.getElementById("gmBasemap").value || "m";
+  return "https://maps.google.com/maps?ll=" + c.lat.toFixed(6) + "," + c.lng.toFixed(6) +
+    "&z=" + z + "&t=" + t + "&output=embed";
+}
+function syncGM(immediate) {
+  clearTimeout(gmTimer);
+  gmTimer = setTimeout(function () {
+    var c = mapGM.getCenter();
+    var z = Math.max(2, Math.min(21, Math.round(mapGM.getZoom())));
+    if (!immediate && gmShown && gmShown.z === z) {
+      var size = mapGM.getSize();
+      var P = mapGM.latLngToContainerPoint([gmShown.lat, gmShown.lng]);
+      if (Math.hypot(P.x - size.x / 2, P.y - size.y / 2) < Math.min(size.x, size.y) * 0.18) return;
+    }
+    gmPending = { lat: c.lat, lng: c.lng, z: z, leafletZ: z };
+    gmBadge.style.display = "inline";
+    var staging = gmFramesArr[gmShownIdx === 0 ? 1 : 0];
+    staging.classList.toggle("fit", gmPass);
+    staging.src = gmUrl(c, z);
+  }, immediate ? 0 : 600);
+}
+gmFramesArr.forEach(function (frame, idx) {
+  frame.addEventListener("load", function () {
+    if (!gmPending || !frame.src) return;
+    clearTimeout(gmSwapTimer);
+    gmSwapTimer = setTimeout(function () {
+      if (!gmPending) return;
+      gmFramesArr.forEach(function (f, j) { f.classList.toggle("shown", j === idx); });
+      gmShownIdx = idx;
+      gmShown = gmPending;
+      gmPending = null;
+      updateGmTransform();
+      gmBadge.style.display = "none";
+    }, 400);
+  });
+});
+mapGM.on("moveend zoomend", function () { if (currentView === "gm") syncGM(false); });
+document.getElementById("gmInteract").addEventListener("click", function () {
+  gmPass = !gmPass;
+  document.getElementById("mapGM").classList.toggle("pass-through", gmPass);
+  this.textContent = "Interact: " + (gmPass ? "ON" : "OFF");
+  syncGM(true);
+  toast(gmPass
+    ? "Google map interaction on — pins are frozen until you toggle OFF."
+    : "Pin interaction restored; Google map re-synced.");
+});
+document.getElementById("gmBasemap").addEventListener("change", function () {
+  try { localStorage.setItem("tc_gmbase_v1", this.value); } catch (e) {}
+  syncGM(true);
+});
+try {
+  var gmBase = localStorage.getItem("tc_gmbase_v1");
+  if (gmBase && gmBase !== "p") document.getElementById("gmBasemap").value = gmBase;
+} catch (e) {}
+
+/* ---------------- view switching ---------------- */
+var VIEW_IDS = { combined: "viewCombined", tf: "viewTF", gm: "viewGM" };
+function viewMap(v) { return v === "tf" ? mapTF : v === "gm" ? mapGM : mapMain; }
+function showView(which) {
+  if (!VIEW_IDS[which]) which = "combined";
+  var from = viewMap(currentView);
+  currentView = which;
+  Object.keys(VIEW_IDS).forEach(function (v) {
+    document.getElementById(VIEW_IDS[v]).style.display = v === which ? "block" : "none";
+  });
+  document.getElementById("tabCombined").classList.toggle("active", which === "combined");
+  document.getElementById("tabTF").classList.toggle("active", which === "tf");
+  document.getElementById("tabGM").classList.toggle("active", which === "gm");
+  var m = viewMap(which);
+  m.setView(from.getCenter(), from.getZoom(), { animate: false });
+  m.invalidateSize();
+  if (which === "tf") { updateTfZoomHint(); syncTF(true); }
+  if (which === "gm") syncGM(true);
+  renderMarkers(true);
+  try { localStorage.setItem(VIEW_KEY, which); } catch (e) {}
+}
+document.getElementById("tabCombined").addEventListener("click", function () { showView("combined"); });
+document.getElementById("tabTF").addEventListener("click", function () { showView("tf"); });
+document.getElementById("tabGM").addEventListener("click", function () { showView("gm"); });
+
+/* ---------------- UI wiring ---------------- */
+function setSidebar(open) {
+  document.getElementById("sidebar").classList.toggle("open", open);
+  document.getElementById("sidebarBackdrop").classList.toggle("open", open);
+}
+document.getElementById("filterBtn").addEventListener("click", function () {
+  setSidebar(!document.getElementById("sidebar").classList.contains("open"));
+});
+document.getElementById("sidebarBackdrop").addEventListener("click", function () { setSidebar(false); });
+document.getElementById("catAll").addEventListener("click", function () { activeCats = null; saveCats(); refreshSidebar(); renderMarkers(true); });
+document.getElementById("catNone").addEventListener("click", function () { activeCats = new Set(); saveCats(); refreshSidebar(); renderMarkers(true); });
+
+/* search: local place names first, then geocode (network) */
+document.getElementById("searchBox").addEventListener("keydown", function (e) {
+  if (e.key !== "Enter" || !this.value.trim()) return;
+  this.blur();
+  var q = this.value.trim(), ql = q.toLowerCase();
+  for (var i = 0; i < places.length; i++) {
+    var p = places[i];
+    if (activeCats && !activeCats.has(p[P_CAT])) continue;
+    if (p[P_NAME].toLowerCase().indexOf(ql) !== -1) {
+      var m = activeMap();
+      m.setView([p[P_LAT], p[P_LNG]], Math.max(m.getZoom(), 13));
+      if (currentView === "tf") syncTF(true);
+      if (currentView === "gm") syncGM(true);
+      renderMarkers(true);
+      toast("📍 " + p[P_NAME]);
+      return;
+    }
+  }
+  fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(q))
+    .then(function (r) { return r.json(); })
+    .then(function (res) {
+      if (!res.length) return toast("No results for “" + q + "”");
+      var lat = parseFloat(res[0].lat), lng = parseFloat(res[0].lon);
+      var m = activeMap();
+      m.setView([lat, lng], 12);
+      if (currentView === "tf") syncTF(true);
+      if (currentView === "gm") syncGM(true);
+    })
+    .catch(function () { toast("No local match; place search needs network."); });
+});
+
+var toastTimer = null;
+function toast(msg) {
+  var t = document.getElementById("toast");
+  t.textContent = msg; t.style.display = "block";
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { t.style.display = "none"; }, 5000);
+}
+
+/* ---------------- service worker ---------------- */
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", function () {
+    navigator.serviceWorker.register("sw.js").catch(function () {});
+  });
+}
+
+/* ---------------- boot ---------------- */
+loadCats();
+loadBundledData().then(function () {
+  setLoad("Rendering…", 1);
+  try {
+    var pos = JSON.parse(localStorage.getItem(POS_KEY));
+    if (pos && isFinite(pos[0])) {
+      mapMain.setView([pos[0], pos[1]], pos[2], { animate: false });
+      mapTF.setView([pos[0], pos[1]], pos[2], { animate: false });
+      mapGM.setView([pos[0], pos[1]], pos[2], { animate: false });
+    }
+  } catch (e) {}
+  refreshAll();
+  var savedView = null;
+  try { savedView = localStorage.getItem(VIEW_KEY); } catch (e) {}
+  showView(savedView || "combined");
+  document.getElementById("loading").style.display = "none";
+}).catch(function (err) {
+  setLoad("Failed to load place data: " + err.message + " — check connection and reload.", 0);
+});
+</script>
+</body>
+</html>
