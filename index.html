@@ -551,7 +551,11 @@ function renderMarkers(force) {
     return;
   }
   var view = map.getBounds();
-  if (!force && map._tc.bounds && map._tc.bounds.contains(view)) return;
+  if (!force && map._tc.bounds && map._tc.bounds.contains(view)) {
+    // buffer still covers the view — but re-render if the icon/dot mode should flip
+    var wantIcons = collectInBounds(view).length <= ICON_MAX;
+    if (wantIcons === map._tc.icons) return;
+  }
 
   var buffered = view.pad(0.6);
   var list = collectInBounds(buffered);
@@ -571,6 +575,7 @@ function renderMarkers(force) {
     })(list[i]);
   }
   map._tc.bounds = truncated ? null : buffered;
+  map._tc.icons = useIcons;
   status.textContent = n.toLocaleString() + " loaded / " + places.length.toLocaleString() + " pins" + (truncated ? " (zoom in for all)" : "");
 }
 var renderMoveTimer = null;
