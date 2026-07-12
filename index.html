@@ -92,26 +92,32 @@
     pointer-events: none; z-index: 900; opacity: .55; font-size: 18px; color: #1e2a32;
     text-shadow: 0 0 3px #fff;
   }
-  #tfToolbar, #gmToolbar {
-    position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
-    background: rgba(30,42,50,.92); color: #fff; border-radius: 8px; padding: 6px 10px;
-    display: flex; align-items: center; gap: 8px; z-index: 1000; font-size: 12px;
-    flex-wrap: wrap; justify-content: center; max-width: 96%;
+  /* compact per-view control bars in the header area (horizontally scrollable) */
+  .subbar {
+    display: none; align-items: center; gap: 6px; padding: 6px 10px;
+    background: #16232c; color: #fff; font-size: 12px; z-index: 1150;
+    overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap;
   }
-  #tfToolbar .btn, #gmToolbar .btn { padding: 6px 9px; font-size: 12px; min-height: 32px; }
-  #tfToolbar select, #gmToolbar select {
+  .subbar.show { display: flex; }
+  .subbar > * { flex-shrink: 0; }
+  .subbar .btn { padding: 5px 9px; font-size: 12px; min-height: 30px; }
+  .subbar select {
     background: #2b3d49; color: #fff; border: 1px solid #46606f;
-    border-radius: 4px; font-size: 13px; padding: 4px; min-height: 30px;
+    border-radius: 5px; font-size: 13px; padding: 4px; min-height: 30px;
   }
-  #tfToolbar input { font-size: 16px; }
+  .subbar input {
+    background: #2b3d49; color: #fff; border: 1px solid #46606f;
+    border-radius: 5px; font-size: 16px; padding: 3px 6px; min-height: 30px;
+  }
+  .subbar a { color: #fec200; }
   #tfLayersPanel {
-    display: none; position: absolute; top: 130%; left: 0; z-index: 1600;
+    display: none; position: absolute; top: 8px; left: 8px; z-index: 1600;
     background: rgba(30,42,50,.97); border: 1px solid #46606f; border-radius: 8px;
-    padding: 8px 12px; white-space: nowrap; text-align: left;
+    padding: 8px 12px; white-space: nowrap; text-align: left; color: #fff;
   }
   #tfLayersPanel.open { display: block; }
-  #tfLayersPanel label { display: block; font-size: 13px; padding: 5px 0; cursor: pointer; }
-  #tfLayersPanel input { width: 16px; height: 16px; vertical-align: middle; }
+  #tfLayersPanel label { display: block; font-size: 14px; padding: 6px 0; cursor: pointer; }
+  #tfLayersPanel input { width: 17px; height: 17px; vertical-align: middle; }
   #tfSyncBadge, #gmSyncBadge { color: #fec200; display: none; }
   #tfHint {
     position: absolute; bottom: calc(env(safe-area-inset-bottom, 0px) + 20px); left: 50%; transform: translateX(-50%);
@@ -154,15 +160,68 @@
   <header>
     <h1>🚵🏕️</h1>
     <div class="seg">
-      <button id="tabCombined" class="active">Combined</button>
-      <button id="tabTF">Trailforks</button>
+      <button id="tabTF" class="active">Trailforks</button>
       <button id="tabGM">Google</button>
+      <button id="tabCombined">Combined</button>
     </div>
     <button class="btn" id="filterBtn">Filters</button>
     <button class="btn" id="osmToggle" title="Public campsites from OpenStreetMap for the visible area">OSM: OFF</button>
     <input id="searchBox" placeholder="Search place…" autocomplete="off">
     <span id="placeCount"></span>
   </header>
+
+  <div id="tfBar" class="subbar">
+    <input id="tfRid" placeholder="rid…" style="width:70px" title="Trailforks region ID — trails render at every zoom when set">
+    <a href="https://www.trailforks.com/widgets/config/region_map/" target="_blank" title="Pick your region, then copy rid=NUMBER from that page's URL">find</a>
+    <select id="tfBasemap" title="Trailforks basemap">
+      <option value="trailforks">Topo</option>
+      <option value="trailforks-streets">Streets</option>
+      <option value="trailforks-dark">Dark</option>
+      <option value="satellite">Satellite</option>
+      <option value="hybrid">Hybrid</option>
+      <option value="arc-world_imagery">Arc Imagery</option>
+      <option value="osm">OSM</option>
+    </select>
+    <select id="tfTrailstyle" title="How trails are colored">
+      <option value="difficulty">Difficulty</option>
+      <option value="status">Status</option>
+      <option value="condition">Condition</option>
+      <option value="random">Colors</option>
+      <option value="popularity">Popularity</option>
+    </select>
+    <select id="tfActivity" title="Activity type">
+      <option value="1">MTB</option>
+      <option value="2">E-Bike</option>
+      <option value="19">Gravel</option>
+      <option value="18">Adaptive</option>
+      <option value="17">Fat Bike</option>
+      <option value="9">Horse</option>
+      <option value="6">Hike</option>
+      <option value="5">Trail Run</option>
+      <option value="7">Moto</option>
+      <option value="14">Trials</option>
+      <option value="8">ATV/OHV</option>
+      <option value="15">Snowmobile</option>
+      <option value="10">Snowshoe</option>
+      <option value="11">DH Ski</option>
+      <option value="12">BC Ski</option>
+      <option value="13">Nordic</option>
+      <option value="0">All</option>
+    </select>
+    <button class="btn" id="tfLayersBtn">Layers ▾</button>
+    <button class="btn" id="tfInteract">Tap trails: OFF</button>
+    <span id="tfSyncBadge">⟳</span>
+  </div>
+
+  <div id="gmBar" class="subbar">
+    <select id="gmBasemap" title="Google basemap">
+      <option value="m">Map</option>
+      <option value="k">Satellite</option>
+      <option value="h">Hybrid</option>
+    </select>
+    <button class="btn" id="gmInteract">Interact: OFF</button>
+    <span id="gmSyncBadge">⟳</span>
+  </div>
 
   <div id="main">
     <div id="sidebarBackdrop"></div>
@@ -188,62 +247,16 @@
         </div>
         <div id="mapTF"></div>
         <div id="tfCrosshair">✛</div>
-        <div id="tfToolbar">
-          <label title="Trailforks region ID — trails render at every zoom when set">rid
-            <input id="tfRid" placeholder="rid…" style="width:74px">
-          </label>
-          <a href="https://www.trailforks.com/widgets/config/region_map/" target="_blank" style="color:#fec200" title="Pick your region, then copy rid=NUMBER from that page's URL">find</a>
-          <span id="tfSyncBadge">⟳</span>
-          <button class="btn" id="tfInteract">Tap trails: OFF</button>
-          <select id="tfBasemap" title="Trailforks basemap">
-            <option value="trailforks">Topo</option>
-            <option value="trailforks-streets">Streets</option>
-            <option value="trailforks-dark">Dark</option>
-            <option value="satellite">Satellite</option>
-            <option value="hybrid">Hybrid</option>
-            <option value="arc-world_imagery">Arc Imagery</option>
-            <option value="osm">OSM</option>
-          </select>
-          <select id="tfTrailstyle" title="How trails are colored">
-            <option value="difficulty">Difficulty</option>
-            <option value="status">Status</option>
-            <option value="condition">Condition</option>
-            <option value="random">Colors</option>
-            <option value="popularity">Popularity</option>
-          </select>
-          <select id="tfActivity" title="Activity type">
-            <option value="1">MTB</option>
-            <option value="2">E-Bike</option>
-            <option value="19">Gravel</option>
-            <option value="18">Adaptive</option>
-            <option value="17">Fat Bike</option>
-            <option value="9">Horse</option>
-            <option value="6">Hike</option>
-            <option value="5">Trail Run</option>
-            <option value="7">Moto</option>
-            <option value="14">Trials</option>
-            <option value="8">ATV/OHV</option>
-            <option value="15">Snowmobile</option>
-            <option value="10">Snowshoe</option>
-            <option value="11">DH Ski</option>
-            <option value="12">BC Ski</option>
-            <option value="13">Nordic</option>
-            <option value="0">All</option>
-          </select>
-          <span style="position:relative">
-            <button class="btn" id="tfLayersBtn">Layers ▾</button>
-            <span id="tfLayersPanel">
-              <label><input type="checkbox" value="trail"> Trail heads</label>
-              <label><input type="checkbox" value="labels" checked> Trail labels</label>
-              <label><input type="checkbox" value="route"> Routes</label>
-              <label><input type="checkbox" value="photo"> Photos</label>
-              <label><input type="checkbox" value="poi" checked> POIs</label>
-              <label><input type="checkbox" value="polygon" checked> Polygons</label>
-              <label><input type="checkbox" value="directory" checked> Places</label>
-              <label><input type="checkbox" value="region" checked> Regions</label>
-              <label><input type="checkbox" value="winter"> Winter only</label>
-            </span>
-          </span>
+        <div id="tfLayersPanel">
+          <label><input type="checkbox" value="trail"> Trail heads</label>
+          <label><input type="checkbox" value="labels" checked> Trail labels</label>
+          <label><input type="checkbox" value="route"> Routes</label>
+          <label><input type="checkbox" value="photo"> Photos</label>
+          <label><input type="checkbox" value="poi" checked> POIs</label>
+          <label><input type="checkbox" value="polygon" checked> Polygons</label>
+          <label><input type="checkbox" value="directory" checked> Places</label>
+          <label><input type="checkbox" value="region" checked> Regions</label>
+          <label><input type="checkbox" value="winter"> Winter only</label>
         </div>
         <div id="tfHint"></div>
       </div>
@@ -255,15 +268,6 @@
         </div>
         <div id="mapGM"></div>
         <div id="gmCrosshair">✛</div>
-        <div id="gmToolbar">
-          <select id="gmBasemap" title="Google basemap">
-            <option value="m">Map</option>
-            <option value="k">Satellite</option>
-            <option value="h">Hybrid</option>
-          </select>
-          <span id="gmSyncBadge">⟳</span>
-          <button class="btn" id="gmInteract">Interact: OFF</button>
-        </div>
       </div>
     </div>
   </div>
@@ -801,10 +805,11 @@ document.getElementById("tfRid").addEventListener("change", function () {
     ? "Region " + tfRid() + " set — trails render at every zoom."
     : "No region ID recognized — trails only at close zoom.");
 });
+var DEFAULT_RID = "4908"; // default Trailforks destination/region
 try {
   var savedRid = localStorage.getItem(RID_KEY);
-  if (savedRid) document.getElementById("tfRid").value = savedRid;
-} catch (e) {}
+  document.getElementById("tfRid").value = savedRid ? savedRid : DEFAULT_RID;
+} catch (e) { document.getElementById("tfRid").value = DEFAULT_RID; }
 
 mapTF.on("moveend zoomend", function () {
   if (currentView === "tf") {
@@ -911,6 +916,9 @@ function showView(which) {
   document.getElementById("tabCombined").classList.toggle("active", which === "combined");
   document.getElementById("tabTF").classList.toggle("active", which === "tf");
   document.getElementById("tabGM").classList.toggle("active", which === "gm");
+  document.getElementById("tfBar").classList.toggle("show", which === "tf");
+  document.getElementById("gmBar").classList.toggle("show", which === "gm");
+  if (which !== "tf") document.getElementById("tfLayersPanel").classList.remove("open");
   var m = viewMap(which);
   m.setView(from.getCenter(), from.getZoom(), { animate: false });
   m.invalidateSize();
@@ -994,9 +1002,7 @@ loadBundledData().then(function () {
     }
   } catch (e) {}
   refreshAll();
-  var savedView = null;
-  try { savedView = localStorage.getItem(VIEW_KEY); } catch (e) {}
-  showView(savedView || "combined");
+  showView("tf"); // always open on the Trailforks view
   document.getElementById("loading").style.display = "none";
 }).catch(function (err) {
   setLoad("Failed to load place data: " + err.message + " — check connection and reload.", 0);
