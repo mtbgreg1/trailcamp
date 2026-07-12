@@ -301,7 +301,8 @@
 var places = [];
 var activeCats = null;               // Set of enabled categories (null = all)
 var DATA_VERSION = "iOverlander export 2026-07";
-var DATA_FILES = ["data/usa.json.gz", "data/canada.json.gz", "data/mexico.json.gz"];
+var DATA_FILES = ["data/usa.json.gz", "data/canada.json.gz", "data/mexico.json.gz",
+                  "data/camerica.json.gz", "data/samerica1.json.gz", "data/samerica2.json.gz"];
 var VIEW_KEY = "tc_view_v1", CATS_KEY = "tc_cats_v1", POS_KEY = "tc_pos_v1";
 var P_NAME = 0, P_LAT = 1, P_LNG = 2, P_CAT = 3, P_DESC = 4, P_DATE = 5;
 
@@ -742,7 +743,7 @@ function refreshSidebar() {
   });
   updateMegaButtons();
   document.getElementById("dataInfo").textContent =
-    places.length.toLocaleString() + " places bundled · " + DATA_VERSION + " · USA, Canada, Mexico";
+    places.length.toLocaleString() + " places bundled · " + DATA_VERSION + " · North, Central & South America";
 }
 function refreshAll() { rebuildGrid(); refreshSidebar(); renderMarkers(true); }
 

@@ -1,5 +1,5 @@
 /* Trails + Camps service worker — bump VERSION whenever you update any file */
-var VERSION = "tc-v5";
+var VERSION = "tc-v6";
 var ASSETS = [
   "./",
   "./index.html",
@@ -17,7 +17,10 @@ var ASSETS = [
   "./icons/icon-512.png",
   "./data/usa.json.gz",
   "./data/canada.json.gz",
-  "./data/mexico.json.gz"
+  "./data/mexico.json.gz",
+  "./data/camerica.json.gz",
+  "./data/samerica1.json.gz",
+  "./data/samerica2.json.gz"
 ];
 
 self.addEventListener("install", function (e) {
