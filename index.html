@@ -60,10 +60,22 @@
   #sidebar h3 { font-size: 12px; text-transform: uppercase; color: #667; margin: 4px 0 8px; }
   .cat-row { display: flex; align-items: center; gap: 8px; padding: 7px 2px; font-size: 14px; cursor: pointer; }
   .cat-row input { width: 18px; height: 18px; }
-  .cat-row .dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; border: 1px solid rgba(0,0,0,.25); }
+  .cat-row .dot {
+    width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0; border: 1px solid rgba(0,0,0,.25);
+    display: flex; align-items: center; justify-content: center; font-size: 12px; line-height: 1;
+  }
   .cat-row .cnt { margin-left: auto; color: #889; font-size: 12px; }
   .sidebar-actions { display: flex; gap: 6px; margin-bottom: 8px; }
   .sidebar-actions button { flex: 1; font-size: 13px; padding: 8px 4px; cursor: pointer; border: 1px solid #c6ced2; background: #fff; border-radius: 6px; min-height: 36px; }
+  .sidebar-actions button.on { background: #fec200; border-color: #e0ab00; font-weight: 600; }
+
+  /* iOverlander-style glyph pins */
+  .pin-ico {
+    display: flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 50%;
+    border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.45);
+    font-size: 13px; line-height: 1;
+  }
   #dataInfo { font-size: 11px; color: #99a; margin-top: 14px; line-height: 1.5; }
 
   /* Map panes */
@@ -226,11 +238,13 @@
   <div id="main">
     <div id="sidebarBackdrop"></div>
     <div id="sidebar">
-      <h3>Categories</h3>
+      <h3>Quick filters</h3>
       <div class="sidebar-actions">
-        <button id="catAll">All</button>
-        <button id="catNone">None</button>
+        <button id="megaCamps">⛺ Campsites</button>
+        <button id="megaAll">All POIs</button>
+        <button id="megaNone">No POIs</button>
       </div>
+      <h3>Categories</h3>
       <div id="catList"></div>
       <div id="dataInfo"></div>
     </div>
@@ -317,6 +331,59 @@ function catColor(cat) {
   if (CAT_COLORS[k]) return CAT_COLORS[k];
   var h = 0; for (var i = 0; i < k.length; i++) h = (h * 31 + k.charCodeAt(i)) >>> 0;
   return PALETTE[h % PALETTE.length];
+}
+
+/* Category glyphs matching iOverlander's category legend (ioverlander.com/legend) */
+var CAT_ICONS = {
+  "wild camping": "⛺",
+  "informal campsite": "⛺",
+  "established campground": "🏕️",
+  "farm & vineyard camping": "🍇",
+  "hotel": "🛏️",
+  "hostel": "🏠",
+  "fuel station": "⛽",
+  "propane": "🔥",
+  "mechanic and parts": "🔧",
+  "water": "💧",
+  "sanitation dump station": "🚽",
+  "short-term parking": "🅿️",
+  "eco-friendly": "♻️",
+  "restaurant": "🍽️",
+  "tourist attraction": "📷",
+  "shopping": "🛒",
+  "financial": "💵",
+  "wifi": "📶",
+  "medical": "🏥",
+  "pet services": "🐾",
+  "laundromat": "🧺",
+  "showers": "🚿",
+  "customs and immigration": "🛂",
+  "checkpoint": "🚓",
+  "consulate / embassy": "🏛️",
+  "vehicle insurance": "📋",
+  "vehicle shipping": "🚢",
+  "vehicle storage": "🚗",
+  "road report": "🚧",
+  "warning": "⚠️",
+  "overnight prohibited": "🚫",
+  "other": "📍"
+};
+function catIcon(cat) {
+  return CAT_ICONS[(cat || "other").toLowerCase()] || "📍";
+}
+/* cached L.divIcon per category */
+var iconCache = {};
+function makeIcon(cat) {
+  var k = (cat || "other").toLowerCase();
+  if (iconCache[k]) return iconCache[k];
+  iconCache[k] = L.divIcon({
+    className: "",
+    html: '<div class="pin-ico" style="background:' + catColor(cat) + '">' + catIcon(cat) + "</div>",
+    iconSize: [26, 26],
+    iconAnchor: [13, 13],
+    popupAnchor: [0, -15]
+  });
+  return iconCache[k];
 }
 
 /* ---------------- bundled data loading ---------------- */
@@ -417,7 +484,7 @@ addLocateCtl(mapGM);
 function popupHtml(p) {
   var c = catColor(p[P_CAT]);
   var q = encodeURIComponent(p[P_NAME]);
-  return '<div><span class="pcat" style="background:' + c + '">' + esc(p[P_CAT]) + "</span>" +
+  return '<div><span class="pcat" style="background:' + c + '">' + catIcon(p[P_CAT]) + " " + esc(p[P_CAT]) + "</span>" +
     "<div><b>" + esc(p[P_NAME]) + "</b></div>" +
     (p[P_DATE] ? '<div style="font-size:11px;color:#789;">verified ' + esc(p[P_DATE]) + "</div>" : "") +
     (p[P_DESC] ? '<div class="pdesc">' + esc(p[P_DESC]) + "</div>" : "") +
@@ -434,6 +501,7 @@ function esc(s) {
 /* Smart viewport loading (spatial grid + zoom gate + render buffer) */
 var MIN_PIN_ZOOM = 5;
 var MAX_RENDER = 4000;
+var ICON_MAX = 600;   // glyph pins below this count; colored dots above (performance)
 var CELL = 0.5;
 var grid = {};
 function rebuildGrid() {
@@ -490,12 +558,16 @@ function renderMarkers(force) {
   st.group.clearLayers();
   var truncated = list.length > MAX_RENDER;
   var n = truncated ? MAX_RENDER : list.length;
+  var useIcons = n <= ICON_MAX; // iOverlander-style glyph pins when zoomed in
   for (var i = 0; i < n; i++) {
     (function (p) {
-      st.group.addLayer(L.circleMarker([p[P_LAT], p[P_LNG]], {
-        renderer: st.renderer, radius: 7, weight: 1.5, color: "#fff",
-        fillColor: catColor(p[P_CAT]), fillOpacity: 0.92
-      }).bindPopup(function () { return popupHtml(p); }));
+      var m = useIcons
+        ? L.marker([p[P_LAT], p[P_LNG]], { icon: makeIcon(p[P_CAT]) })
+        : L.circleMarker([p[P_LAT], p[P_LNG]], {
+            renderer: st.renderer, radius: 7, weight: 1.5, color: "#fff",
+            fillColor: catColor(p[P_CAT]), fillOpacity: 0.92
+          });
+      st.group.addLayer(m.bindPopup(function () { return popupHtml(p); }));
     })(list[i]);
   }
   map._tc.bounds = truncated ? null : buffered;
@@ -652,16 +724,18 @@ function refreshSidebar() {
     row.className = "cat-row";
     var on = !activeCats || activeCats.has(c);
     row.innerHTML = '<input type="checkbox" ' + (on ? "checked" : "") + '>' +
-      '<span class="dot" style="background:' + catColor(c) + '"></span>' +
+      '<span class="dot" style="background:' + catColor(c) + '">' + catIcon(c) + "</span>" +
       "<span>" + esc(c) + '</span><span class="cnt">' + counts[c].toLocaleString() + "</span>";
     row.querySelector("input").addEventListener("change", function (e) {
       if (!activeCats) activeCats = new Set(cats);
       if (e.target.checked) activeCats.add(c); else activeCats.delete(c);
       saveCats();
+      updateMegaButtons();
       renderMarkers(true);
     });
     el.appendChild(row);
   });
+  updateMegaButtons();
   document.getElementById("dataInfo").textContent =
     places.length.toLocaleString() + " places bundled · " + DATA_VERSION + " · USA, Canada, Mexico";
 }
@@ -940,8 +1014,36 @@ document.getElementById("filterBtn").addEventListener("click", function () {
   setSidebar(!document.getElementById("sidebar").classList.contains("open"));
 });
 document.getElementById("sidebarBackdrop").addEventListener("click", function () { setSidebar(false); });
-document.getElementById("catAll").addEventListener("click", function () { activeCats = null; saveCats(); refreshSidebar(); renderMarkers(true); });
-document.getElementById("catNone").addEventListener("click", function () { activeCats = new Set(); saveCats(); refreshSidebar(); renderMarkers(true); });
+/* mega filters: campsites only / all POIs / no POIs */
+var CAMP_CATS = ["Wild Camping", "Informal Campsite", "Established Campground", "Farm & Vineyard Camping"];
+function allCatsInData() {
+  var s = {};
+  places.forEach(function (p) { s[p[P_CAT]] = 1; });
+  return Object.keys(s);
+}
+function updateMegaButtons() {
+  var isNone = activeCats && activeCats.size === 0;
+  var isCamps = false;
+  if (activeCats && activeCats.size > 0) {
+    isCamps = true;
+    activeCats.forEach(function (c) { if (CAMP_CATS.indexOf(c) === -1) isCamps = false; });
+  }
+  document.getElementById("megaAll").classList.toggle("on", !activeCats);
+  document.getElementById("megaCamps").classList.toggle("on", isCamps);
+  document.getElementById("megaNone").classList.toggle("on", !!isNone);
+}
+document.getElementById("megaCamps").addEventListener("click", function () {
+  activeCats = new Set(allCatsInData().filter(function (c) { return CAMP_CATS.indexOf(c) !== -1; }));
+  saveCats(); refreshSidebar(); renderMarkers(true);
+});
+document.getElementById("megaAll").addEventListener("click", function () {
+  activeCats = null;
+  saveCats(); refreshSidebar(); renderMarkers(true);
+});
+document.getElementById("megaNone").addEventListener("click", function () {
+  activeCats = new Set();
+  saveCats(); refreshSidebar(); renderMarkers(true);
+});
 
 /* search: local place names first, then geocode (network) */
 document.getElementById("searchBox").addEventListener("keydown", function (e) {

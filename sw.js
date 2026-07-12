@@ -1,5 +1,5 @@
 /* Trails + Camps service worker — bump VERSION whenever you update any file */
-var VERSION = "tc-v2";
+var VERSION = "tc-v3";
 var ASSETS = [
   "./",
   "./index.html",
