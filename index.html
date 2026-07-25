@@ -178,6 +178,7 @@
     </div>
     <button class="btn" id="filterBtn">Filters</button>
     <button class="btn" id="osmToggle" title="Public campsites from OpenStreetMap for the visible area">OSM: OFF</button>
+    <button class="btn" id="routeBtn" title="Plan a driving route and filter campsites along it">Route</button>
     <input id="searchBox" placeholder="Search place…" autocomplete="off">
     <span id="placeCount"></span>
   </header>
@@ -233,6 +234,20 @@
     </select>
     <button class="btn" id="gmInteract">Interact: OFF</button>
     <span id="gmSyncBadge">⟳</span>
+  </div>
+
+  <div id="routeBar" class="subbar">
+    <input id="routeStart" placeholder="Start ('me' = GPS)" style="width:128px" autocomplete="off">
+    <input id="routeEnd" placeholder="End" style="width:110px" autocomplete="off">
+    <button class="btn primary" id="routeGo">Route</button>
+    <select id="routeCorridor" title="Show only pins within this distance of the route">
+      <option value="0">All pins</option>
+      <option value="5">±5 mi</option>
+      <option value="10">±10 mi</option>
+      <option value="25">±25 mi</option>
+    </select>
+    <button class="btn" id="routeClear">Clear</button>
+    <span id="routeInfo"></span>
   </div>
 
   <div id="main">
@@ -543,6 +558,37 @@ function renderMarkers(force) {
   var map = st.map;
   if (!map._tc) map._tc = { bounds: null };
   var status = document.getElementById("placeCount");
+
+  /* corridor mode: show only pins along the planned route, at any zoom */
+  if (corridorPlaces) {
+    if (!force && map._tc.corridorV === corridorVersion) return;
+    var clist = [];
+    for (var ci = 0; ci < corridorPlaces.length; ci++) {
+      var cp = corridorPlaces[ci];
+      if (activeCats && !activeCats.has(cp[P_CAT])) continue;
+      clist.push(cp);
+      if (clist.length >= MAX_RENDER) break;
+    }
+    st.group.clearLayers();
+    var useIcons2 = clist.length <= ICON_MAX;
+    for (var cj = 0; cj < clist.length; cj++) {
+      (function (p) {
+        var mk = useIcons2
+          ? L.marker([p[P_LAT], p[P_LNG]], { icon: makeIcon(p[P_CAT]) })
+          : L.circleMarker([p[P_LAT], p[P_LNG]], {
+              renderer: st.renderer, radius: 7, weight: 1.5, color: "#fff",
+              fillColor: catColor(p[P_CAT]), fillOpacity: 0.92
+            });
+        st.group.addLayer(mk.bindPopup(function () { return popupHtml(p); }));
+      })(clist[cj]);
+    }
+    map._tc.corridorV = corridorVersion;
+    map._tc.bounds = null;
+    map._tc.icons = undefined;
+    status.textContent = clist.length.toLocaleString() + " pins along route (±" + corridorMiles() + " mi)";
+    return;
+  }
+  map._tc.corridorV = null;
 
   if (map.getZoom() < MIN_PIN_ZOOM) {
     if (map._tc.bounds !== null || force) { st.group.clearLayers(); map._tc.bounds = null; }
@@ -981,6 +1027,180 @@ document.getElementById("gmBasemap").addEventListener("change", function () {
 try {
   var gmBase = localStorage.getItem("tc_gmbase_v1");
   if (gmBase && gmBase !== "p") document.getElementById("gmBasemap").value = gmBase;
+} catch (e) {}
+
+/* ---------------- driving route + corridor filter ---------------- */
+var routeLayerMain = L.layerGroup().addTo(mapMain);
+var routeLayerTF = L.layerGroup().addTo(mapTF);
+var routeLayerGM = L.layerGroup().addTo(mapGM);
+var routeGeom = null, routeSegs = null, routeBBox = null;
+var corridorPlaces = null, corridorVersion = 0;
+var ROUTE_KEY = "tc_route_v1";
+
+function corridorMiles() {
+  return parseFloat(document.getElementById("routeCorridor").value) || 0;
+}
+function saveRoutePrefs() {
+  try {
+    localStorage.setItem(ROUTE_KEY, JSON.stringify({
+      s: document.getElementById("routeStart").value,
+      e: document.getElementById("routeEnd").value,
+      c: document.getElementById("routeCorridor").value
+    }));
+  } catch (e) {}
+}
+
+function geocodeOne(q) {
+  var m = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if (m) return Promise.resolve([parseFloat(m[1]), parseFloat(m[2]), q]);
+  var ql = q.toLowerCase();
+  if (ql === "me" || ql === "my location" || ql === "here") {
+    return new Promise(function (res, rej) {
+      if (!navigator.geolocation) return rej(new Error("location not available"));
+      navigator.geolocation.getCurrentPosition(function (pos) {
+        res([pos.coords.latitude, pos.coords.longitude, "My location"]);
+      }, function () { rej(new Error("couldn't get your location")); },
+      { enableHighAccuracy: true, timeout: 12000 });
+    });
+  }
+  return fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(q))
+    .then(function (r) { return r.json(); })
+    .then(function (res) {
+      if (!res.length) throw new Error("“" + q + "” not found");
+      return [parseFloat(res[0].lat), parseFloat(res[0].lon), res[0].display_name.split(",")[0]];
+    });
+}
+
+function abIcon(label, color) {
+  return L.divIcon({
+    className: "",
+    html: '<div class="pin-ico" style="background:' + color + ';color:#fff;font-weight:700;font-size:14px">' + label + "</div>",
+    iconSize: [26, 26], iconAnchor: [13, 13]
+  });
+}
+function drawRoute(coords, a, b) {
+  [routeLayerMain, routeLayerTF, routeLayerGM].forEach(function (lay) {
+    lay.clearLayers();
+    lay.addLayer(L.polyline(coords, { color: "#fff", weight: 9, opacity: 0.7 }));
+    lay.addLayer(L.polyline(coords, { color: "#2962ff", weight: 5, opacity: 0.9 }));
+    lay.addLayer(L.marker(a, { icon: abIcon("A", "#1b5e20") }));
+    lay.addLayer(L.marker(b, { icon: abIcon("B", "#b71c1c") }));
+  });
+}
+function clearRoute() {
+  routeGeom = routeSegs = routeBBox = null;
+  corridorPlaces = null; corridorVersion++;
+  [routeLayerMain, routeLayerTF, routeLayerGM].forEach(function (l) { l.clearLayers(); });
+  document.getElementById("routeInfo").textContent = "";
+  renderMarkers(true);
+}
+
+/* sampled route segments in local km coordinates, for fast distance tests */
+function buildSegs() {
+  routeSegs = [];
+  var step = Math.max(1, Math.floor(routeGeom.length / 400));
+  var pts = [];
+  for (var i = 0; i < routeGeom.length; i += step) pts.push(routeGeom[i]);
+  if (pts[pts.length - 1] !== routeGeom[routeGeom.length - 1]) pts.push(routeGeom[routeGeom.length - 1]);
+  for (var j = 0; j < pts.length - 1; j++) {
+    var a = pts[j], b = pts[j + 1];
+    var cos = Math.max(0.2, Math.cos((a[0] + b[0]) / 2 * Math.PI / 180));
+    routeSegs.push({
+      ax: a[1] * cos * 111.32, ay: a[0] * 111.32,
+      bx: b[1] * cos * 111.32, by: b[0] * 111.32, cos: cos,
+      minLat: Math.min(a[0], b[0]), maxLat: Math.max(a[0], b[0]),
+      minLng: Math.min(a[1], b[1]), maxLng: Math.max(a[1], b[1])
+    });
+  }
+  var mnLa = 90, mxLa = -90, mnLo = 180, mxLo = -180;
+  for (var k = 0; k < routeGeom.length; k++) {
+    var p = routeGeom[k];
+    if (p[0] < mnLa) mnLa = p[0]; if (p[0] > mxLa) mxLa = p[0];
+    if (p[1] < mnLo) mnLo = p[1]; if (p[1] > mxLo) mxLo = p[1];
+  }
+  routeBBox = [mnLa, mxLa, mnLo, mxLo];
+}
+function computeCorridor() {
+  corridorVersion++;
+  var mi = corridorMiles();
+  if (!routeGeom || !mi) { corridorPlaces = null; return; }
+  var rkm = mi * 1.60934;
+  var latPad = rkm / 111.32;
+  var cosMin = Math.max(0.2, Math.cos(Math.max(Math.abs(routeBBox[0]), Math.abs(routeBBox[1])) * Math.PI / 180));
+  var lngPadG = rkm / (111.32 * cosMin);
+  var mnLa = routeBBox[0] - latPad, mxLa = routeBBox[1] + latPad;
+  var mnLo = routeBBox[2] - lngPadG, mxLo = routeBBox[3] + lngPadG;
+  for (var s = 0; s < routeSegs.length; s++) routeSegs[s].lp = rkm / (111.32 * routeSegs[s].cos);
+  var out = [];
+  for (var i = 0; i < places.length; i++) {
+    var p = places[i];
+    var la = p[P_LAT], lo = p[P_LNG];
+    if (la < mnLa || la > mxLa || lo < mnLo || lo > mxLo) continue;
+    for (var j = 0; j < routeSegs.length; j++) {
+      var sg = routeSegs[j];
+      if (la < sg.minLat - latPad || la > sg.maxLat + latPad ||
+          lo < sg.minLng - sg.lp || lo > sg.maxLng + sg.lp) continue;
+      var px = lo * sg.cos * 111.32, py = la * 111.32;
+      var dx = sg.bx - sg.ax, dy = sg.by - sg.ay;
+      var t = ((px - sg.ax) * dx + (py - sg.ay) * dy) / ((dx * dx + dy * dy) || 1);
+      if (t < 0) t = 0; else if (t > 1) t = 1;
+      var qx = sg.ax + t * dx - px, qy = sg.ay + t * dy - py;
+      if (qx * qx + qy * qy <= rkm * rkm) { out.push(p); break; }
+    }
+  }
+  corridorPlaces = out;
+}
+
+document.getElementById("routeGo").addEventListener("click", function () {
+  var s = document.getElementById("routeStart").value.trim();
+  var e = document.getElementById("routeEnd").value.trim();
+  if (!s || !e) return toast("Enter both a start and an end.");
+  toast("Routing…");
+  var A, B;
+  geocodeOne(s).then(function (a) { A = a; return geocodeOne(e); })
+    .then(function (b) {
+      B = b;
+      return fetch("https://router.project-osrm.org/route/v1/driving/" +
+        A[1] + "," + A[0] + ";" + B[1] + "," + B[0] + "?overview=full&geometries=geojson");
+    })
+    .then(function (r) { if (!r.ok) throw new Error("routing server " + r.status); return r.json(); })
+    .then(function (data) {
+      if (!data.routes || !data.routes.length) throw new Error("no route found");
+      var rt = data.routes[0];
+      routeGeom = rt.geometry.coordinates.map(function (c) { return [c[1], c[0]]; });
+      buildSegs();
+      drawRoute(routeGeom, [A[0], A[1]], [B[0], B[1]]);
+      var hrs = Math.floor(rt.duration / 3600), mins = Math.round((rt.duration % 3600) / 60);
+      document.getElementById("routeInfo").textContent =
+        Math.round(rt.distance / 1609.34).toLocaleString() + " mi · " + hrs + "h" + (mins < 10 ? "0" : "") + mins;
+      computeCorridor();
+      activeMap().fitBounds(L.latLngBounds(routeGeom).pad(0.08));
+      renderMarkers(true);
+      saveRoutePrefs();
+      toast("Route: " + A[2] + " → " + B[2]);
+    })
+    .catch(function (err) { toast("Routing failed: " + err.message); });
+});
+document.getElementById("routeCorridor").addEventListener("change", function () {
+  computeCorridor();
+  renderMarkers(true);
+  saveRoutePrefs();
+});
+document.getElementById("routeClear").addEventListener("click", clearRoute);
+document.getElementById("routeBtn").addEventListener("click", function () {
+  document.getElementById("routeBar").classList.toggle("show");
+  mapMain.invalidateSize(); mapTF.invalidateSize(); mapGM.invalidateSize();
+});
+["routeStart", "routeEnd"].forEach(function (id) {
+  document.getElementById(id).addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { this.blur(); document.getElementById("routeGo").click(); }
+  });
+});
+try {
+  var rs = JSON.parse(localStorage.getItem(ROUTE_KEY) || "{}");
+  if (rs.s) document.getElementById("routeStart").value = rs.s;
+  if (rs.e) document.getElementById("routeEnd").value = rs.e;
+  if (rs.c) document.getElementById("routeCorridor").value = rs.c;
 } catch (e) {}
 
 /* ---------------- view switching ---------------- */
