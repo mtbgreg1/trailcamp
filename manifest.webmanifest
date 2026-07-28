@@ -1,7 +1,7 @@
 {
-  "name": "Trails + Camps",
-  "short_name": "Trails+Camps",
-  "description": "Trailforks trails + iOverlander camps for USA, Canada and Mexico — offline place data.",
+  "name": "Trailcamp",
+  "short_name": "Trailcamp",
+  "description": "Trailforks trails + iOverlander camps across North, Central and South America — offline place data.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

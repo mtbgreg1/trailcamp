@@ -1,9 +1,10 @@
-# Trails + Camps — iPhone PWA
+# Trailcamp — iPhone PWA
 
 Your Trailforks × iOverlander map as an installable iPhone web app, with all
-97,269 iOverlander places (USA, Canada, Mexico — full descriptions) bundled in.
-No file uploads ever; pins work fully offline after the first load. Map tiles,
-the Trailforks/Google views, OSM camps, and geocoder search need a connection.
+195,779 iOverlander places (North, Central & South America — full descriptions)
+bundled in. No file uploads ever; pins work fully offline after the first load.
+Map tiles, the Trailforks/Google views, OSM camps, route planning, and geocoder
+search need a connection.
 
 ## Put it on GitHub Pages (one-time, ~10 minutes, all in the browser)
 
