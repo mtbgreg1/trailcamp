@@ -1392,18 +1392,23 @@ function attachAutocomplete(input, opts) {
     list.style.left = Math.max(6, left) + "px";
     list.style.top = (r.bottom + 4) + "px";
     list.style.width = w + "px";
-    /* Fit the space visible above the keyboard, then trim to a half row so the
-       next result peeks out — a visual cue that the list scrolls. */
-    var avail = Math.max(132, Math.min(vh - r.bottom - 12, vh * 0.55));
+    /* Aim for 4 full rows plus a half-row peek; shrink only if the keyboard
+       leaves less room than that. */
+    var ROWS_SHOWN = 4;
+    var room = Math.max(132, Math.min(vh - r.bottom - 10, vh * 0.8));
+    var avail = room;
     var rowEl = list.querySelector(".ac-item");
     if (rowEl) {
       var rh = rowEl.getBoundingClientRect().height || 46;
       var noteEl = list.querySelector(".ac-note");
       var noteH = noteEl ? noteEl.getBoundingClientRect().height : 0;
       var contentH = noteH + rh * items.length;
-      if (contentH > avail) {
+      avail = Math.min(room, noteH + rh * (ROWS_SHOWN + 0.5));
+      if (contentH <= avail) {
+        avail = contentH;                       // everything fits: no peek needed
+      } else {
         var full = Math.max(1, Math.floor((avail - noteH - rh * 0.5) / rh));
-        avail = noteH + rh * (full + 0.5);
+        avail = noteH + rh * (full + 0.5);      // land exactly on a half row
       }
     }
     list.style.maxHeight = Math.round(avail) + "px";
