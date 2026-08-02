@@ -1464,10 +1464,9 @@ function attachAutocomplete(input, opts) {
     lastQ = q;
     timer = setTimeout(function () { query(q); }, 320);
   });
-  /* touching the list blurs the input on mobile — don't close mid-scroll */
-  input.addEventListener("blur", function () {
-    setTimeout(function () { if (!touching) close(); }, 150);
-  });
+  /* No blur-based closing: touching the list to scroll blurs the input on
+     mobile, and any timer race there can yank the list away mid-scroll.
+     The outside-tap handler below closes it instead. */
   input.addEventListener("focus", function () { if (items.length) { place(); list.classList.add("open"); } });
   /* close when tapping anywhere outside the field and the list */
   document.addEventListener("pointerdown", function (e) {
