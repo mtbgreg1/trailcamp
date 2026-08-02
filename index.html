@@ -15,14 +15,16 @@
 <script src="lib/pako_inflate.min.js"></script>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { margin: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overscroll-behavior: none; }
-  #app { display: flex; flex-direction: column; height: 100%; }
+  html, body { margin: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overscroll-behavior: none; overflow-x: hidden; }
+  #app { display: flex; flex-direction: column; height: 100%; max-width: 100%; overflow-x: hidden; }
 
   header {
     display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
     padding: calc(env(safe-area-inset-top, 0px) + 8px) 10px 8px;
     background: #1e2a32; color: #fff; z-index: 1200; user-select: none; -webkit-user-select: none;
+    max-width: 100%; overflow-x: hidden;
   }
+  header > * { min-width: 0; }
   header h1 { font-size: 16px; margin: 0 4px 0 0; font-weight: 600; }
   .seg { display: flex; border-radius: 7px; overflow: hidden; border: 1px solid #46606f; }
   .seg button {
@@ -35,9 +37,12 @@
     padding: 8px 12px; font-size: 13px; cursor: pointer; min-height: 36px;
   }
   .btn.primary { background: #fec200; color: #1e2a32; border-color: #fec200; font-weight: 600; }
+  /* full-width own row: keeps the header from ever exceeding the screen width,
+     which is what made focusing the field scroll the whole header sideways */
   #searchBox {
     padding: 8px 10px; border-radius: 7px; border: 1px solid #46606f;
-    background: #2b3d49; color: #fff; font-size: 16px; flex: 1; min-width: 110px; min-height: 36px;
+    background: #2b3d49; color: #fff; font-size: 16px;
+    flex: 1 1 100%; min-width: 0; width: 100%; max-width: 100%; min-height: 36px;
   }
   #searchBox::placeholder { color: #8fa6b3; }
   #placeCount { font-size: 11px; color: #9fb7c4; width: 100%; }
