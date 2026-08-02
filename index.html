@@ -155,6 +155,31 @@
   .leaflet-popup-content .pcat { display: inline-block; padding: 1px 7px; border-radius: 9px; color: #fff; font-size: 11px; margin-bottom: 4px; }
   .leaflet-popup-content .pdesc { max-height: 150px; overflow-y: auto; -webkit-overflow-scrolling: touch; white-space: pre-wrap; color: #445; }
 
+  /* ---- location typeahead ---- */
+  .ac-list {
+    position: fixed; z-index: 3600; display: none;
+    background: #fff; border-radius: 10px; overflow: hidden auto;
+    box-shadow: 0 8px 28px rgba(0,0,0,.35); max-height: 46vh;
+    -webkit-overflow-scrolling: touch; font-size: 14px;
+  }
+  .ac-list.open { display: block; }
+  .ac-item {
+    display: flex; align-items: center; gap: 10px; padding: 11px 12px;
+    cursor: pointer; border-bottom: 1px solid #eceff1; min-height: 46px;
+  }
+  .ac-item:last-child { border-bottom: 0; }
+  .ac-item.sel, .ac-item:hover { background: #fff8e1; }
+  .ac-ico {
+    width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 14px;
+    background: #eceff1;
+  }
+  .ac-ico.local { background: #fec200; }
+  .ac-txt { min-width: 0; flex: 1; }
+  .ac-name { color: #1e2a32; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ac-sub { color: #78909c; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ac-note { padding: 9px 12px; color: #90a4ae; font-size: 12.5px; }
+
   #toast {
     position: fixed; bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); left: 50%; transform: translateX(-50%);
     z-index: 3000; background: #1e2a32; color: #fff;
@@ -1076,6 +1101,14 @@ function geocodeOne(q) {
     });
 }
 
+/* exact coords remembered when a route field's suggestion is tapped */
+var routePicked = {};
+function resolvePoint(id, val) {
+  var p = routePicked[id];
+  if (p && p.label === val) return Promise.resolve([p.lat, p.lng, p.label]);
+  return geocodeOne(val);
+}
+
 function abIcon(label, color) {
   return L.divIcon({
     className: "",
@@ -1162,7 +1195,7 @@ document.getElementById("routeGo").addEventListener("click", function () {
   if (!s || !e) return toast("Enter both a start and an end.");
   toast("Routing…");
   var A, B;
-  geocodeOne(s).then(function (a) { A = a; return geocodeOne(e); })
+  resolvePoint("routeStart", s).then(function (a) { A = a; return resolvePoint("routeEnd", e); })
     .then(function (b) {
       B = b;
       return fetch("https://router.project-osrm.org/route/v1/driving/" +
@@ -1276,6 +1309,161 @@ document.getElementById("megaNone").addEventListener("click", function () {
   saveCats(); refreshSidebar(); renderMarkers(true);
 });
 
+/* ---------------- location typeahead ----------------
+   Suggests towns, parks, natural features and landmarks (Nominatim), plus
+   matching bundled iOverlander places (works offline). */
+var GEO_CLASSES = {
+  place: 1, boundary: 1, natural: 1, leisure: 1, tourism: 1,
+  historic: 1, waterway: 1, landuse: 1, mountain_pass: 1
+};
+var GEO_TYPE_ICON = {
+  city: "🏙️", town: "🏘️", village: "🏘️", hamlet: "🏘️", municipality: "🏘️",
+  suburb: "🏘️", locality: "📍", county: "🗺️", state: "🗺️", region: "🗺️",
+  island: "🏝️", national_park: "🏞️", protected_area: "🏞️", nature_reserve: "🏞️",
+  park: "🏞️", forest: "🌲", wood: "🌲", peak: "⛰️", volcano: "🌋", ridge: "⛰️",
+  valley: "🏔️", cliff: "🧗", glacier: "🧊", water: "💧", bay: "🌊", beach: "🏖️",
+  river: "💧", stream: "💧", waterfall: "💦", hot_spring: "♨️", desert: "🏜️",
+  attraction: "📷", viewpoint: "👁️", camp_site: "🏕️", wilderness_hut: "🛖",
+  museum: "🏛️", monument: "🗿", memorial: "🗿", ruins: "🏛️",
+  archaeological_site: "🏺", castle: "🏰", mountain_pass: "🛤️"
+};
+function geoIcon(r) {
+  return GEO_TYPE_ICON[r.type] || (r.class === "place" ? "🏘️" : "📍");
+}
+function splitName(dn) {
+  var parts = (dn || "").split(",");
+  return { name: parts[0].trim(), sub: parts.slice(1).join(",").trim() };
+}
+/* local (offline) matches from the bundled iOverlander data */
+function localSuggest(q, max) {
+  var ql = q.toLowerCase();
+  var pre = [], sub = [];
+  for (var i = 0; i < places.length; i++) {
+    var p = places[i];
+    var nl = p[P_NAME].toLowerCase();
+    var idx = nl.indexOf(ql);
+    if (idx === 0) { if (pre.length < max) pre.push(p); }
+    else if (idx > 0) { if (sub.length < max) sub.push(p); }
+    if (pre.length >= max) break;
+  }
+  return pre.concat(sub).slice(0, max).map(function (p) {
+    return {
+      lat: p[P_LAT], lng: p[P_LNG], name: p[P_NAME],
+      sub: p[P_CAT] + " · saved place", icon: catIcon(p[P_CAT]), local: true
+    };
+  });
+}
+
+function attachAutocomplete(input, opts) {
+  opts = opts || {};
+  var list = document.createElement("div");
+  list.className = "ac-list";
+  document.body.appendChild(list);
+  var items = [], sel = -1, timer = null, ctrl = null, lastQ = "";
+
+  function place() {
+    var r = input.getBoundingClientRect();
+    var w = Math.max(r.width, 260);
+    w = Math.min(w, window.innerWidth - 12);
+    var left = Math.min(r.left, window.innerWidth - w - 6);
+    list.style.left = Math.max(6, left) + "px";
+    list.style.top = (r.bottom + 4) + "px";
+    list.style.width = w + "px";
+  }
+  function close() { list.classList.remove("open"); sel = -1; }
+  function render(note) {
+    list.innerHTML = "";
+    if (note) {
+      var n = document.createElement("div");
+      n.className = "ac-note"; n.textContent = note;
+      list.appendChild(n);
+    }
+    items.forEach(function (it, i) {
+      var row = document.createElement("div");
+      row.className = "ac-item" + (i === sel ? " sel" : "");
+      row.innerHTML = '<span class="ac-ico' + (it.local ? " local" : "") + '">' + it.icon + "</span>" +
+        '<span class="ac-txt"><span class="ac-name"></span><span class="ac-sub"></span></span>';
+      row.querySelector(".ac-name").textContent = it.name;
+      var subEl = row.querySelector(".ac-sub");
+      if (it.sub) subEl.textContent = it.sub; else subEl.style.display = "none";
+      // pointerdown fires before blur, so the tap always registers
+      row.addEventListener("pointerdown", function (e) { e.preventDefault(); choose(i); });
+      list.appendChild(row);
+    });
+    if (items.length || note) { place(); list.classList.add("open"); } else close();
+  }
+  function choose(i) {
+    var it = items[i];
+    if (!it) return;
+    input.value = it.name;
+    close();
+    input.blur();
+    opts.onPick(it);
+  }
+  function query(q) {
+    var local = opts.local ? localSuggest(q, 3) : [];
+    if (local.length) { items = local; render(); }
+    if (ctrl) ctrl.abort();
+    ctrl = new AbortController();
+    var m = activeMap();
+    var b = m.getBounds();
+    var vb = "&viewbox=" + b.getWest().toFixed(3) + "," + b.getNorth().toFixed(3) + "," +
+      b.getEast().toFixed(3) + "," + b.getSouth().toFixed(3) + "&bounded=0";
+    fetch("https://nominatim.openstreetmap.org/search?format=json&limit=12&addressdetails=0" +
+      vb + "&q=" + encodeURIComponent(q), { signal: ctrl.signal })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (input.value.trim() !== q) return; // stale
+        var keep = res.filter(function (r) { return GEO_CLASSES[r.class]; });
+        if (keep.length < 3) keep = res;      // fall back rather than show nothing
+        var geo = keep.slice(0, 7).map(function (r) {
+          var s = splitName(r.display_name);
+          return { lat: parseFloat(r.lat), lng: parseFloat(r.lon), name: s.name, sub: s.sub, icon: geoIcon(r) };
+        });
+        items = local.concat(geo);
+        render(items.length ? "" : "No matches");
+      })
+      .catch(function (e) {
+        if (e.name === "AbortError") return;
+        items = local;
+        render(local.length ? "" : "Search needs a connection");
+      });
+  }
+
+  input.addEventListener("input", function () {
+    var q = this.value.trim();
+    clearTimeout(timer);
+    if (q.length < 2) { items = []; close(); return; }
+    if (q === lastQ) return;
+    lastQ = q;
+    timer = setTimeout(function () { query(q); }, 320);
+  });
+  input.addEventListener("blur", function () { setTimeout(close, 120); });
+  input.addEventListener("focus", function () { if (items.length) { place(); list.classList.add("open"); } });
+  window.addEventListener("resize", function () { if (list.classList.contains("open")) place(); });
+
+  /* capture phase so arrow/enter selection beats the field's own Enter handler */
+  document.addEventListener("keydown", function (e) {
+    if (e.target !== input || !list.classList.contains("open") || !items.length) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      sel = e.key === "ArrowDown"
+        ? (sel + 1) % items.length
+        : (sel <= 0 ? items.length - 1 : sel - 1);
+      render();
+      var el = list.children[sel + (list.querySelector(".ac-note") ? 1 : 0)];
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+    } else if (e.key === "Enter" && sel >= 0) {
+      e.preventDefault(); e.stopPropagation();
+      choose(sel);
+    } else if (e.key === "Escape") {
+      close();
+    }
+  }, true);
+
+  return { close: close };
+}
+
 /* search: local place names first, then geocode (network) */
 document.getElementById("searchBox").addEventListener("keydown", function (e) {
   if (e.key !== "Enter" || !this.value.trim()) return;
@@ -1305,6 +1493,28 @@ document.getElementById("searchBox").addEventListener("keydown", function (e) {
       if (currentView === "gm") syncGM(true);
     })
     .catch(function () { toast("No local match; place search needs network."); });
+});
+
+/* wire the typeahead to the three location fields */
+attachAutocomplete(document.getElementById("searchBox"), {
+  local: true,
+  onPick: function (it) {
+    var m = activeMap();
+    m.setView([it.lat, it.lng], Math.max(m.getZoom(), it.local ? 14 : 12));
+    if (currentView === "tf") syncTF(true);
+    if (currentView === "gm") syncGM(true);
+    renderMarkers(true);
+    toast("📍 " + it.name);
+  }
+});
+["routeStart", "routeEnd"].forEach(function (id) {
+  attachAutocomplete(document.getElementById(id), {
+    local: false,
+    onPick: function (it) {
+      routePicked[id] = { label: it.name, lat: it.lat, lng: it.lng };
+      saveRoutePrefs();
+    }
+  });
 });
 
 var toastTimer = null;
