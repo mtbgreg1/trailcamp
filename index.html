@@ -158,14 +158,18 @@
   /* ---- location typeahead ---- */
   .ac-list {
     position: fixed; z-index: 3600; display: none;
-    background: #fff; border-radius: 10px; overflow: hidden auto;
+    background: #fff; border-radius: 10px;
+    overflow-x: hidden; overflow-y: auto;
     box-shadow: 0 8px 28px rgba(0,0,0,.35); max-height: 46vh;
     -webkit-overflow-scrolling: touch; font-size: 14px;
+    touch-action: pan-y;                 /* let a thumb drag scroll the list */
+    overscroll-behavior: contain;        /* don't chain the scroll to the map */
   }
   .ac-list.open { display: block; }
   .ac-item {
     display: flex; align-items: center; gap: 10px; padding: 11px 12px;
     cursor: pointer; border-bottom: 1px solid #eceff1; min-height: 46px;
+    touch-action: pan-y;
   }
   .ac-item:last-child { border-bottom: 0; }
   .ac-item.sel, .ac-item:hover { background: #fff8e1; }
@@ -1360,15 +1364,20 @@ function attachAutocomplete(input, opts) {
   list.className = "ac-list";
   document.body.appendChild(list);
   var items = [], sel = -1, timer = null, ctrl = null, lastQ = "";
+  var touching = false, dragged = false, startX = 0, startY = 0;
 
   function place() {
     var r = input.getBoundingClientRect();
-    var w = Math.max(r.width, 260);
-    w = Math.min(w, window.innerWidth - 12);
-    var left = Math.min(r.left, window.innerWidth - w - 6);
+    var vv = window.visualViewport;
+    var vw = (vv && vv.width) || window.innerWidth;
+    var vh = (vv && vv.height) || window.innerHeight;
+    var w = Math.min(Math.max(r.width, 260), vw - 12);
+    var left = Math.min(r.left, vw - w - 6);
     list.style.left = Math.max(6, left) + "px";
     list.style.top = (r.bottom + 4) + "px";
     list.style.width = w + "px";
+    // fit the space actually visible above the keyboard, so the list can scroll
+    list.style.maxHeight = Math.max(132, Math.min(vh - r.bottom - 12, vh * 0.55)) + "px";
   }
   function close() { list.classList.remove("open"); sel = -1; }
   function render(note) {
@@ -1386,8 +1395,6 @@ function attachAutocomplete(input, opts) {
       row.querySelector(".ac-name").textContent = it.name;
       var subEl = row.querySelector(".ac-sub");
       if (it.sub) subEl.textContent = it.sub; else subEl.style.display = "none";
-      // pointerdown fires before blur, so the tap always registers
-      row.addEventListener("pointerdown", function (e) { e.preventDefault(); choose(i); });
       list.appendChild(row);
     });
     if (items.length || note) { place(); list.classList.add("open"); } else close();
@@ -1430,6 +1437,25 @@ function attachAutocomplete(input, opts) {
       });
   }
 
+  /* Distinguish a thumb-scroll from a tap: only fire on pointerup that didn't
+     drag. Nothing calls preventDefault on pointerdown, so the list scrolls
+     natively. */
+  list.addEventListener("pointerdown", function (e) {
+    touching = true; dragged = false; startX = e.clientX; startY = e.clientY;
+  });
+  list.addEventListener("pointermove", function (e) {
+    if (touching && (Math.abs(e.clientY - startY) > 8 || Math.abs(e.clientX - startX) > 8)) dragged = true;
+  });
+  list.addEventListener("pointerup", function (e) {
+    touching = false;
+    if (dragged) return;                       // that was a scroll, not a tap
+    var row = e.target.closest ? e.target.closest(".ac-item") : null;
+    if (!row) return;
+    var rows = Array.prototype.slice.call(list.querySelectorAll(".ac-item"));
+    choose(rows.indexOf(row));
+  });
+  list.addEventListener("pointercancel", function () { touching = false; });
+
   input.addEventListener("input", function () {
     var q = this.value.trim();
     clearTimeout(timer);
@@ -1438,9 +1464,22 @@ function attachAutocomplete(input, opts) {
     lastQ = q;
     timer = setTimeout(function () { query(q); }, 320);
   });
-  input.addEventListener("blur", function () { setTimeout(close, 120); });
+  /* touching the list blurs the input on mobile — don't close mid-scroll */
+  input.addEventListener("blur", function () {
+    setTimeout(function () { if (!touching) close(); }, 150);
+  });
   input.addEventListener("focus", function () { if (items.length) { place(); list.classList.add("open"); } });
+  /* close when tapping anywhere outside the field and the list */
+  document.addEventListener("pointerdown", function (e) {
+    if (e.target === input || list.contains(e.target)) return;
+    close();
+  });
   window.addEventListener("resize", function () { if (list.classList.contains("open")) place(); });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", function () {
+      if (list.classList.contains("open")) place();
+    });
+  }
 
   /* capture phase so arrow/enter selection beats the field's own Enter handler */
   document.addEventListener("keydown", function (e) {
