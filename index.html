@@ -172,6 +172,14 @@
     touch-action: pan-y;
   }
   .ac-item:last-child { border-bottom: 0; }
+  /* fade over the half-visible row: signals "there's more, scroll me" */
+  .ac-fade {
+    position: sticky; bottom: 0; height: 38px; margin-top: -38px;
+    pointer-events: none; display: flex; align-items: flex-end; justify-content: center;
+    padding-bottom: 2px; font-size: 13px; color: #78909c;
+    background: linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(255,255,255,.72) 45%, rgba(255,255,255,.94) 100%);
+  }
+  .ac-list:not(.more) .ac-fade { display: none; }
   .ac-item.sel, .ac-item:hover { background: #fff8e1; }
   .ac-ico {
     width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
@@ -1358,6 +1366,14 @@ function localSuggest(q, max) {
   });
 }
 
+/* Absorb the ghost click that follows a tap on a dropdown row, so it can't
+   trigger the header button that was sitting underneath the list. */
+var swallowUntil = 0;
+document.addEventListener("click", function (e) {
+  if (Date.now() < swallowUntil) { e.preventDefault(); e.stopPropagation(); }
+}, true);
+function swallowClicks() { swallowUntil = Date.now() + 700; }
+
 function attachAutocomplete(input, opts) {
   opts = opts || {};
   var list = document.createElement("div");
@@ -1376,8 +1392,26 @@ function attachAutocomplete(input, opts) {
     list.style.left = Math.max(6, left) + "px";
     list.style.top = (r.bottom + 4) + "px";
     list.style.width = w + "px";
-    // fit the space actually visible above the keyboard, so the list can scroll
-    list.style.maxHeight = Math.max(132, Math.min(vh - r.bottom - 12, vh * 0.55)) + "px";
+    /* Fit the space visible above the keyboard, then trim to a half row so the
+       next result peeks out — a visual cue that the list scrolls. */
+    var avail = Math.max(132, Math.min(vh - r.bottom - 12, vh * 0.55));
+    var rowEl = list.querySelector(".ac-item");
+    if (rowEl) {
+      var rh = rowEl.getBoundingClientRect().height || 46;
+      var noteEl = list.querySelector(".ac-note");
+      var noteH = noteEl ? noteEl.getBoundingClientRect().height : 0;
+      var contentH = noteH + rh * items.length;
+      if (contentH > avail) {
+        var full = Math.max(1, Math.floor((avail - noteH - rh * 0.5) / rh));
+        avail = noteH + rh * (full + 0.5);
+      }
+    }
+    list.style.maxHeight = Math.round(avail) + "px";
+  }
+  function updateFade() {
+    var more = list.scrollHeight > list.clientHeight + 2 &&
+               list.scrollTop + list.clientHeight < list.scrollHeight - 2;
+    list.classList.toggle("more", more);
   }
   function close() { list.classList.remove("open"); sel = -1; }
   function render(note) {
@@ -1397,7 +1431,15 @@ function attachAutocomplete(input, opts) {
       if (it.sub) subEl.textContent = it.sub; else subEl.style.display = "none";
       list.appendChild(row);
     });
-    if (items.length || note) { place(); list.classList.add("open"); } else close();
+    if (items.length || note) {
+      var fade = document.createElement("div");
+      fade.className = "ac-fade";
+      fade.textContent = "⌄";
+      list.appendChild(fade);
+      place();
+      list.classList.add("open");
+      updateFade();
+    } else close();
   }
   function choose(i) {
     var it = items[i];
@@ -1451,10 +1493,18 @@ function attachAutocomplete(input, opts) {
     if (dragged) return;                       // that was a scroll, not a tap
     var row = e.target.closest ? e.target.closest(".ac-item") : null;
     if (!row) return;
+    /* Stop the browser's synthesized click: the list closes on selection, so
+       that click would otherwise land on whatever header control sits beneath. */
+    e.preventDefault();
+    swallowClicks();
     var rows = Array.prototype.slice.call(list.querySelectorAll(".ac-item"));
     choose(rows.indexOf(row));
   });
+  list.addEventListener("touchend", function (e) {
+    if (!dragged && e.target.closest && e.target.closest(".ac-item")) e.preventDefault();
+  });
   list.addEventListener("pointercancel", function () { touching = false; });
+  list.addEventListener("scroll", updateFade);
 
   input.addEventListener("input", function () {
     var q = this.value.trim();
