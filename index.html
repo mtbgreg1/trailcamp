@@ -1363,6 +1363,30 @@ function trailIcon(el) {
            track: "🛤️", bridleway: "🐎" }[t.highway] || "🥾";
 }
 function rxEscape(s) { return s.replace(/[.*+?^${}()|[\]\\"]/g, "\\$&"); }
+/* the public Overpass instance rate-limits and answers with an XML error page,
+   so try mirrors in turn and never hand a non-JSON body to JSON.parse */
+var OVERPASS_HOSTS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.osm.ch/api/interpreter"
+];
+var trailCache = {};
+function overpassJson(body, signal, i) {
+  i = i || 0;
+  if (i >= OVERPASS_HOSTS.length) return Promise.reject(new Error("overpass unavailable"));
+  return fetch(OVERPASS_HOSTS[i], {
+    method: "POST", signal: signal,
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body
+  }).then(function (r) { return r.text(); }).then(function (txt) {
+    var t = txt.replace(/^﻿/, "").trim();
+    if (t.charAt(0) !== "{") throw new Error("busy");   // XML error / rate limited
+    return JSON.parse(t);
+  }).catch(function (e) {
+    if (e.name === "AbortError") throw e;
+    return overpassJson(body, signal, i + 1);           // next mirror
+  });
+}
 function trailSuggest(q, signal) {
   var m = activeMap(), b = m.getBounds(), c = m.getCenter();
   var s = b.getSouth(), n = b.getNorth(), w = b.getWest(), e = b.getEast();
@@ -1376,11 +1400,9 @@ function trailSuggest(q, signal) {
     'way["highway"~"^(' + TRAIL_WAY_TYPES + ')$"]["name"~"' + rx + '",i](' + box + ");" +
     'relation["route"~"^(' + TRAIL_ROUTE_TYPES + ')$"]["name"~"' + rx + '",i](' + box + ");" +
     ");out center 40;";
-  return fetch("https://overpass-api.de/api/interpreter", {
-    method: "POST", signal: signal,
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: "data=" + encodeURIComponent(ql)
-  }).then(function (r) { return r.json(); }).then(function (d) {
+  var ck = q.toLowerCase() + "@" + box;
+  if (trailCache[ck]) return Promise.resolve(trailCache[ck]);
+  return overpassJson("data=" + encodeURIComponent(ql), signal).then(function (d) {
     var seen = {}, systems = [], singles = [];
     (d.elements || []).forEach(function (el) {
       var t = el.tags || {};
@@ -1399,7 +1421,9 @@ function trailSuggest(q, signal) {
       };
       (el.type === "relation" ? systems : singles).push(rec);
     });
-    return systems.concat(singles).slice(0, 6);    // whole systems first
+    var out = systems.concat(singles).slice(0, 6);  // whole systems first
+    trailCache[ck] = out;
+    return out;
   });
 }
 
@@ -1543,12 +1567,16 @@ function attachAutocomplete(input, opts) {
       .catch(function () {})
       .then(function () { done++; merge(done < 2); });
 
-    /* named trails and trail systems near the current view */
+    /* named trails and trail systems near the current view — held back a beat
+       longer, since Overpass is heavier than the geocoder */
     if (q.length >= 3) {
-      trailSuggest(q, sig)
-        .then(function (t) { trails = t; })
-        .catch(function () {})
-        .then(function () { done++; merge(done < 2); });
+      setTimeout(function () {
+        if (sig.aborted || input.value.trim() !== q) { done++; return; }
+        trailSuggest(q, sig)
+          .then(function (t) { trails = t; })
+          .catch(function () {})
+          .then(function () { done++; merge(done < 2); });
+      }, 350);
     } else { done++; }
   }
 
