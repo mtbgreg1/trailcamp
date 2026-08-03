@@ -748,14 +748,9 @@ function fetchOsmCamps(showToasts) {
     b.getSouth().toFixed(5) + "," + b.getWest().toFixed(5) + "," +
     b.getNorth().toFixed(5) + "," + b.getEast().toFixed(5) + ");out center 1500;";
   osmFetching = true;
-  fetch("https://overpass-api.de/api/interpreter", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: "data=" + encodeURIComponent(q)
-  }).then(function (r) {
-    if (!r.ok) throw new Error("overpass " + r.status);
-    return r.json();
-  }).then(function (data) {
+  /* same multi-mirror helper the trail search uses, so a stalled Overpass
+     server can't leave this hanging either */
+  overpassJson("data=" + encodeURIComponent(q)).then(function (data) {
     osmFetching = false;
     osmLastBounds = b;
     var added = 0;
@@ -1365,26 +1360,60 @@ function trailIcon(el) {
 function rxEscape(s) { return s.replace(/[.*+?^${}()|[\]\\"]/g, "\\$&"); }
 /* the public Overpass instance rate-limits and answers with an XML error page,
    so try mirrors in turn and never hand a non-JSON body to JSON.parse */
+/* All must have worldwide coverage — a region-limited instance would answer
+   quickly with zero results and look like "no trails found". */
 var OVERPASS_HOSTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
-  "https://overpass.osm.ch/api/interpreter"
+  "https://overpass.private.coffee/api/interpreter",
+  "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
 ];
 var trailCache = {};
-function overpassJson(body, signal, i) {
-  i = i || 0;
-  if (i >= OVERPASS_HOSTS.length) return Promise.reject(new Error("overpass unavailable"));
-  return fetch(OVERPASS_HOSTS[i], {
-    method: "POST", signal: signal,
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body
-  }).then(function (r) { return r.text(); }).then(function (txt) {
-    var t = txt.replace(/^﻿/, "").trim();
-    if (t.charAt(0) !== "{") throw new Error("busy");   // XML error / rate limited
-    return JSON.parse(t);
-  }).catch(function (e) {
-    if (e.name === "AbortError") throw e;
-    return overpassJson(body, signal, i + 1);           // next mirror
+/* Hedged requests: start with one mirror, and if it hasn't answered shortly,
+   bring in the next as well — first valid JSON wins. A busy Overpass server
+   will hold a connection open indefinitely, so a plain sequential fallback
+   with no timeout can hang forever. */
+function overpassJson(body, signal) {
+  return new Promise(function (resolve, reject) {
+    var settled = false, next = 0, failures = 0, acs = [];
+    function cleanup() {
+      acs.forEach(function (a) { try { a.abort(); } catch (e) {} });
+    }
+    if (signal) {
+      if (signal.aborted) return reject(new Error("aborted"));
+      signal.addEventListener("abort", function () {
+        if (settled) return;
+        settled = true; cleanup(); reject(new Error("aborted"));
+      });
+    }
+    function launch() {
+      if (settled || next >= OVERPASS_HOSTS.length) return;
+      var host = OVERPASS_HOSTS[next++];
+      var ac = new AbortController();
+      acs.push(ac);
+      var to = setTimeout(function () { try { ac.abort(); } catch (e) {} }, 12000);
+      fetch(host, {
+        method: "POST", signal: ac.signal,
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body
+      }).then(function (r) { return r.text(); }).then(function (txt) {
+        clearTimeout(to);
+        var t = txt.replace(/^﻿/, "").trim();
+        if (t.charAt(0) !== "{") throw new Error("busy");  // XML error / rate limited
+        if (settled) return;
+        settled = true; cleanup(); resolve(JSON.parse(t));
+      }).catch(function () {
+        clearTimeout(to);
+        if (settled) return;
+        failures++;
+        if (failures >= OVERPASS_HOSTS.length) { settled = true; reject(new Error("overpass unavailable")); }
+        else launch();                                     // a mirror failed: try the next now
+      });
+    }
+    launch();
+    setTimeout(function () { if (!settled) launch(); }, 2000);
+    setTimeout(function () { if (!settled) launch(); }, 4500);
+    setTimeout(function () { if (!settled) launch(); }, 7000);
   });
 }
 function trailSuggest(q, signal) {
