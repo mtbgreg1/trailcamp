@@ -1,5 +1,5 @@
 /* Trailcamp service worker — bump VERSION whenever you update any file */
-var VERSION = "tc-v17";
+var VERSION = "tc-v18";
 var ASSETS = [
   "./",
   "./index.html",
@@ -23,10 +23,20 @@ var ASSETS = [
   "./data/samerica2.json.gz"
 ];
 
+/* Fetch with cache:"reload" so install always stores what the server has now.
+   Plain addAll() goes through the browser's HTTP cache, which on GitHub Pages
+   can be up to 10 minutes stale — that would file yesterday's files under a
+   fresh version key and the update would silently do nothing. */
 self.addEventListener("install", function (e) {
   e.waitUntil(
-    caches.open(VERSION).then(function (c) { return c.addAll(ASSETS); })
-      .then(function () { return self.skipWaiting(); })
+    caches.open(VERSION).then(function (c) {
+      return Promise.all(ASSETS.map(function (u) {
+        return fetch(new Request(u, { cache: "reload" })).then(function (r) {
+          if (!r.ok) throw new Error(u + " " + r.status);
+          return c.put(u, r);
+        });
+      }));
+    }).then(function () { return self.skipWaiting(); })
   );
 });
 
