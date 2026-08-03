@@ -1324,6 +1324,16 @@ var GEO_CLASSES = {
   place: 1, boundary: 1, natural: 1, leisure: 1, tourism: 1,
   historic: 1, waterway: 1, landuse: 1, mountain_pass: 1
 };
+/* Trail-ish results the geocoder can return. These come back for the whole
+   world, so a trail well outside the current map view is still findable —
+   Overpass only covers the area you're looking at. Street types are absent
+   on purpose. */
+var GEO_TRAIL_TYPES = { path: 1, track: 1, cycleway: 1, bridleway: 1, footway: 1 };
+var GEO_ROUTE_TYPES = { mtb: 1, hiking: 1, bicycle: 1, foot: 1, horse: 1, ski: 1, piste: 1 };
+function isTrailResult(r) {
+  return (r.class === "highway" && GEO_TRAIL_TYPES[r.type]) ||
+         (r.class === "route" && GEO_ROUTE_TYPES[r.type]);
+}
 var GEO_TYPE_ICON = {
   city: "🏙️", town: "🏘️", village: "🏘️", hamlet: "🏘️", municipality: "🏘️",
   suburb: "🏘️", locality: "📍", county: "🗺️", state: "🗺️", region: "🗺️",
@@ -1580,7 +1590,10 @@ function attachAutocomplete(input, opts) {
 
     function merge(waiting) {
       if (input.value.trim() !== q) return;      // user kept typing
-      items = local.concat(trails, geo);
+      var seen = {};
+      trails.forEach(function (t) { seen[t.name.toLowerCase()] = 1; });
+      var geoDeduped = geo.filter(function (g) { return !seen[g.name.toLowerCase()]; });
+      items = local.concat(trails, geoDeduped);
       render(items.length ? "" : (waiting ? "Searching…" : "No matches"));
     }
 
@@ -1592,11 +1605,17 @@ function attachAutocomplete(input, opts) {
       vb + "&q=" + encodeURIComponent(q), { signal: sig })
       .then(function (r) { return r.json(); })
       .then(function (res) {
-        /* towns / parks / natural features only — never streets or addresses */
-        geo = res.filter(function (r) { return GEO_CLASSES[r.class]; })
-          .slice(0, 6).map(function (r) {
+        /* towns / parks / natural features, plus named trails anywhere in the
+           world — never streets or addresses */
+        geo = res.filter(function (r) { return GEO_CLASSES[r.class] || isTrailResult(r); })
+          .slice(0, 7).map(function (r) {
             var s = splitName(r.display_name);
-            return { lat: parseFloat(r.lat), lng: parseFloat(r.lon), name: s.name, sub: s.sub, icon: geoIcon(r) };
+            var t = isTrailResult(r);
+            return {
+              lat: parseFloat(r.lat), lng: parseFloat(r.lon), name: s.name, sub: t ? "Trail · " + s.sub : s.sub,
+              icon: t ? (r.class === "route" ? "🚵" : r.type === "track" ? "🛤️" : "🥾") : geoIcon(r),
+              trail: t
+            };
           });
       })
       .catch(function () {})
