@@ -1390,7 +1390,13 @@ function overpassJson(body, signal, i) {
 function trailSuggest(q, signal) {
   var m = activeMap(), b = m.getBounds(), c = m.getCenter();
   var s = b.getSouth(), n = b.getNorth(), w = b.getWest(), e = b.getEast();
-  // cap the search box so a zoomed-out view can't trigger a huge scan
+  /* Guarantee a real search area: when zoomed in tight — or if the map
+     reports empty bounds because its container hasn't been sized yet — the
+     box would collapse and Overpass would match nothing. Also cap it so a
+     world view can't trigger a huge scan. */
+  var MIN_SPAN = 0.7;   // ~75 km, so nearby trails still turn up
+  if (!isFinite(n - s) || n - s < MIN_SPAN) { s = c.lat - MIN_SPAN / 2; n = c.lat + MIN_SPAN / 2; }
+  if (!isFinite(e - w) || e - w < MIN_SPAN) { w = c.lng - MIN_SPAN / 2; e = c.lng + MIN_SPAN / 2; }
   if (n - s > 4) { s = c.lat - 2; n = c.lat + 2; }
   if (e - w > 4) { w = c.lng - 2; e = c.lng + 2; }
   var box = s.toFixed(4) + "," + w.toFixed(4) + "," + n.toFixed(4) + "," + e.toFixed(4);

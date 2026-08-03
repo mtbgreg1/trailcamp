@@ -1,5 +1,5 @@
 /* Trailcamp service worker — bump VERSION whenever you update any file */
-var VERSION = "tc-v18";
+var VERSION = "tc-v19";
 var ASSETS = [
   "./",
   "./index.html",
