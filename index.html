@@ -187,6 +187,7 @@
     background: #eceff1;
   }
   .ac-ico.local { background: #fec200; }
+  .ac-ico.trail { background: #c8e6c9; }
   .ac-txt { min-width: 0; flex: 1; }
   .ac-name { color: #1e2a32; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ac-sub { color: #78909c; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1346,6 +1347,62 @@ function splitName(dn) {
   var parts = (dn || "").split(",");
   return { name: parts[0].trim(), sub: parts.slice(1).join(",").trim() };
 }
+/* ---- OSM trail search (Overpass) ----
+   Only trail-type ways and route relations are queried, so streets, addresses
+   and other junk can't come back. Route relations are whole trail systems /
+   long-distance routes; ways are individual named trails. */
+var TRAIL_WAY_TYPES = "path|track|cycleway|bridleway|footway";
+var TRAIL_ROUTE_TYPES = "mtb|hiking|bicycle|foot|horse|ski|piste";
+function trailIcon(el) {
+  var t = el.tags || {};
+  if (t.route) {
+    return { mtb: "🚵", bicycle: "🚴", hiking: "🥾", foot: "🥾",
+             horse: "🐎", ski: "⛷️", piste: "⛷️" }[t.route] || "🚵";
+  }
+  return { cycleway: "🚵", path: "🥾", footway: "🥾",
+           track: "🛤️", bridleway: "🐎" }[t.highway] || "🥾";
+}
+function rxEscape(s) { return s.replace(/[.*+?^${}()|[\]\\"]/g, "\\$&"); }
+function trailSuggest(q, signal) {
+  var m = activeMap(), b = m.getBounds(), c = m.getCenter();
+  var s = b.getSouth(), n = b.getNorth(), w = b.getWest(), e = b.getEast();
+  // cap the search box so a zoomed-out view can't trigger a huge scan
+  if (n - s > 4) { s = c.lat - 2; n = c.lat + 2; }
+  if (e - w > 4) { w = c.lng - 2; e = c.lng + 2; }
+  var box = s.toFixed(4) + "," + w.toFixed(4) + "," + n.toFixed(4) + "," + e.toFixed(4);
+  var rx = rxEscape(q);
+  var ql =
+    "[out:json][timeout:20];(" +
+    'way["highway"~"^(' + TRAIL_WAY_TYPES + ')$"]["name"~"' + rx + '",i](' + box + ");" +
+    'relation["route"~"^(' + TRAIL_ROUTE_TYPES + ')$"]["name"~"' + rx + '",i](' + box + ");" +
+    ");out center 40;";
+  return fetch("https://overpass-api.de/api/interpreter", {
+    method: "POST", signal: signal,
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: "data=" + encodeURIComponent(ql)
+  }).then(function (r) { return r.json(); }).then(function (d) {
+    var seen = {}, systems = [], singles = [];
+    (d.elements || []).forEach(function (el) {
+      var t = el.tags || {};
+      if (!t.name) return;
+      var key = t.name.toLowerCase();
+      if (seen[key]) return;                       // a trail is many way segments
+      seen[key] = 1;
+      var lat = el.lat != null ? el.lat : (el.center && el.center.lat);
+      var lng = el.lon != null ? el.lon : (el.center && el.center.lon);
+      if (typeof lat !== "number" || typeof lng !== "number") return;
+      var rec = {
+        lat: lat, lng: lng, name: t.name, icon: trailIcon(el), trail: true,
+        sub: el.type === "relation"
+          ? "Trail system" + (t.route ? " · " + t.route : "")
+          : "Trail" + (t.highway ? " · " + t.highway : "")
+      };
+      (el.type === "relation" ? systems : singles).push(rec);
+    });
+    return systems.concat(singles).slice(0, 6);    // whole systems first
+  });
+}
+
 /* local (offline) matches from the bundled iOverlander data */
 function localSuggest(q, max) {
   var ql = q.toLowerCase();
@@ -1429,7 +1486,7 @@ function attachAutocomplete(input, opts) {
     items.forEach(function (it, i) {
       var row = document.createElement("div");
       row.className = "ac-item" + (i === sel ? " sel" : "");
-      row.innerHTML = '<span class="ac-ico' + (it.local ? " local" : "") + '">' + it.icon + "</span>" +
+      row.innerHTML = '<span class="ac-ico' + (it.local ? " local" : it.trail ? " trail" : "") + '">' + it.icon + "</span>" +
         '<span class="ac-txt"><span class="ac-name"></span><span class="ac-sub"></span></span>';
       row.querySelector(".ac-name").textContent = it.name;
       var subEl = row.querySelector(".ac-sub");
@@ -1456,32 +1513,43 @@ function attachAutocomplete(input, opts) {
   }
   function query(q) {
     var local = opts.local ? localSuggest(q, 3) : [];
+    var trails = [], geo = [], done = 0;
     if (local.length) { items = local; render(); }
     if (ctrl) ctrl.abort();
     ctrl = new AbortController();
+    var sig = ctrl.signal;
+
+    function merge(waiting) {
+      if (input.value.trim() !== q) return;      // user kept typing
+      items = local.concat(trails, geo);
+      render(items.length ? "" : (waiting ? "Searching…" : "No matches"));
+    }
+
     var m = activeMap();
     var b = m.getBounds();
     var vb = "&viewbox=" + b.getWest().toFixed(3) + "," + b.getNorth().toFixed(3) + "," +
       b.getEast().toFixed(3) + "," + b.getSouth().toFixed(3) + "&bounded=0";
     fetch("https://nominatim.openstreetmap.org/search?format=json&limit=12&addressdetails=0" +
-      vb + "&q=" + encodeURIComponent(q), { signal: ctrl.signal })
+      vb + "&q=" + encodeURIComponent(q), { signal: sig })
       .then(function (r) { return r.json(); })
       .then(function (res) {
-        if (input.value.trim() !== q) return; // stale
-        var keep = res.filter(function (r) { return GEO_CLASSES[r.class]; });
-        if (keep.length < 3) keep = res;      // fall back rather than show nothing
-        var geo = keep.slice(0, 7).map(function (r) {
-          var s = splitName(r.display_name);
-          return { lat: parseFloat(r.lat), lng: parseFloat(r.lon), name: s.name, sub: s.sub, icon: geoIcon(r) };
-        });
-        items = local.concat(geo);
-        render(items.length ? "" : "No matches");
+        /* towns / parks / natural features only — never streets or addresses */
+        geo = res.filter(function (r) { return GEO_CLASSES[r.class]; })
+          .slice(0, 6).map(function (r) {
+            var s = splitName(r.display_name);
+            return { lat: parseFloat(r.lat), lng: parseFloat(r.lon), name: s.name, sub: s.sub, icon: geoIcon(r) };
+          });
       })
-      .catch(function (e) {
-        if (e.name === "AbortError") return;
-        items = local;
-        render(local.length ? "" : "Search needs a connection");
-      });
+      .catch(function () {})
+      .then(function () { done++; merge(done < 2); });
+
+    /* named trails and trail systems near the current view */
+    if (q.length >= 3) {
+      trailSuggest(q, sig)
+        .then(function (t) { trails = t; })
+        .catch(function () {})
+        .then(function () { done++; merge(done < 2); });
+    } else { done++; }
   }
 
   /* Distinguish a thumb-scroll from a tap: only fire on pointerup that didn't
