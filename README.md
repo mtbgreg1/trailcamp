@@ -64,11 +64,21 @@ blocks scripted requests, so this can't run on a schedule anywhere. Ask Claude
 to "refresh the Planet Fitness data" and it'll redo the harvest through the
 browser. Expect roughly 2% drift per year as clubs open.
 
+**Start from their public feed**, which lists every club worldwide with
+coordinates — no key, no login, one request:
+
+```
+https://cde-assets-planetfitness.s3.amazonaws.com/locations.json
+```
+
+That single file replaces the entire club-directory crawl. It doesn't include
+address, phone or hours, so those still come from individual club pages, but it
+tells you exactly which clubs exist. (It was found last rather than first the
+one time this was built — see §9 of `TRAILCAMP-HANDOFF.md` for the full story
+and the traps.)
+
 When the data is regenerated, **bump `PF_UPDATED` in `index.html`** (it's shown
-in the sidebar) and the version string in `sw.js`. Useful starting point: their
-own public feed at
-`https://cde-assets-planetfitness.s3.amazonaws.com/locations.json`, which lists
-every club worldwide with coordinates.
+in the sidebar) and the version string in `sw.js`.
 
 ## Good to know
 
