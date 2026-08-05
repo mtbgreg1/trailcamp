@@ -833,7 +833,8 @@ function loadCats() {
 /* Sidebar order: the three big camping categories first (they're what the app
    is mainly for), then Planet Fitness, then everything else alphabetically.
    Planet Fitness is a small category by count but wanted near the top. */
-var CAT_PINNED = ["Wild Camping", "Informal Campsite", "Established Campground", PF_CAT];
+var CAT_PINNED = ["Wild Camping", "Informal Campsite", "Established Campground",
+                  PF_CAT, "Showers", "Water"];
 function sortCats(cats) {
   var pinned = [];
   CAT_PINNED.forEach(function (p) { if (cats.indexOf(p) !== -1) pinned.push(p); });
