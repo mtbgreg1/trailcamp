@@ -41,6 +41,35 @@ for permission once).
   `TrailCamp-iOS/tools/convert.py`) regenerate `data/*.json.gz`, upload, bump
   `sw.js` version.
 
+## Planet Fitness layer
+
+**Last updated: August 4, 2026 — 2,940 clubs** (US, Puerto Rico, Canada, Mexico).
+
+A separate POI category, toggled on and off like any other filter. It sits near
+the top of the filter list, just below the three big camping categories. Pins
+are purple with a yellow "PF" monogram, and obey the same minimum zoom as every
+other pin, so they only appear once you're zoomed in.
+
+Tapping a pin shows the street address, a tappable phone number, the full weekly
+hours, and Apple Maps / Google Maps directions links.
+
+97% of clubs have address, phone and hours. The exceptions are Mexico's 50
+clubs (their site has no server-rendered club pages, so those are name and
+coordinates only) plus a handful of stragglers.
+
+### Refreshing it
+
+There is no automatic refresh — Planet Fitness sits behind Cloudflare, which
+blocks scripted requests, so this can't run on a schedule anywhere. Ask Claude
+to "refresh the Planet Fitness data" and it'll redo the harvest through the
+browser. Expect roughly 2% drift per year as clubs open.
+
+When the data is regenerated, **bump `PF_UPDATED` in `index.html`** (it's shown
+in the sidebar) and the version string in `sw.js`. Useful starting point: their
+own public feed at
+`https://cde-assets-planetfitness.s3.amazonaws.com/locations.json`, which lists
+every club worldwide with coordinates.
+
 ## Good to know
 
 - **Offline**: all 97k pins + full descriptions are cached on the phone. If iOS

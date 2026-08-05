@@ -81,6 +81,12 @@
     border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.45);
     font-size: 13px; line-height: 1;
   }
+  /* Planet Fitness: their brand colours (purple + yellow) rendered as a "PF"
+     monogram. Deliberately NOT their actual logo file — same approach taken
+     with the iOverlander category icons, and it stays legible at 26px. */
+  .pin-ico.pf, .dot.pf, .pcat.pf { color: #F1EB43; font-weight: 800; letter-spacing: .3px; }
+  .pin-ico.pf { font-size: 11px; }
+  .dot.pf { font-size: 10px; }
   #dataInfo { font-size: 11px; color: #99a; margin-top: 14px; line-height: 1.5; }
 
   /* Map panes */
@@ -359,8 +365,14 @@
 var places = [];
 var activeCats = null;               // Set of enabled categories (null = all)
 var DATA_VERSION = "iOverlander export 2026-07";
+/* Planet Fitness layer: harvested from Planet Fitness's own club directory and
+   their public locations.json feed. Bump PF_UPDATED whenever data/planetfitness
+   .json.gz is regenerated — it's shown in the sidebar so the age is visible. */
+var PF_CAT = "Planet Fitness";
+var PF_UPDATED = "2026-08-04";
 var DATA_FILES = ["data/usa.json.gz", "data/canada.json.gz", "data/mexico.json.gz",
-                  "data/camerica.json.gz", "data/samerica1.json.gz", "data/samerica2.json.gz"];
+                  "data/camerica.json.gz", "data/samerica1.json.gz", "data/samerica2.json.gz",
+                  "data/planetfitness.json.gz"];
 var VIEW_KEY = "tc_view_v1", CATS_KEY = "tc_cats_v1", POS_KEY = "tc_pos_v1";
 var P_NAME = 0, P_LAT = 1, P_LNG = 2, P_CAT = 3, P_DESC = 4, P_DATE = 5;
 
@@ -382,7 +394,8 @@ var CAT_COLORS = {
   "tourist attraction": "#3949ab",
   "short-term parking": "#607d8b",
   "hotel": "#6a1b9a",
-  "overnight prohibited": "#b71c1c"
+  "overnight prohibited": "#b71c1c",
+  "planet fitness": "#7B2D8E"
 };
 var PALETTE = ["#546e7a","#26a69a","#ef6c00","#5c6bc0","#9ccc65","#ec407a","#78909c","#7e57c2"];
 function catColor(cat) {
@@ -425,10 +438,16 @@ var CAT_ICONS = {
   "road report": "🚧",
   "warning": "⚠️",
   "overnight prohibited": "🚫",
+  "planet fitness": "PF",
   "other": "📍"
 };
 function catIcon(cat) {
   return CAT_ICONS[(cat || "other").toLowerCase()] || "📍";
+}
+/* Planet Fitness draws a "PF" monogram rather than an emoji glyph, so it needs
+   the extra class that colours the text yellow. */
+function catExtraClass(cat) {
+  return (cat || "").toLowerCase() === "planet fitness" ? " pf" : "";
 }
 /* cached L.divIcon per category */
 var iconCache = {};
@@ -437,7 +456,7 @@ function makeIcon(cat) {
   if (iconCache[k]) return iconCache[k];
   iconCache[k] = L.divIcon({
     className: "",
-    html: '<div class="pin-ico" style="background:' + catColor(cat) + '">' + catIcon(cat) + "</div>",
+    html: '<div class="pin-ico' + catExtraClass(cat) + '" style="background:' + catColor(cat) + '">' + catIcon(cat) + "</div>",
     iconSize: [26, 26],
     iconAnchor: [13, 13],
     popupAnchor: [0, -15]
@@ -540,13 +559,21 @@ addLocateCtl(mapMain);
 addLocateCtl(mapTF);
 addLocateCtl(mapGM);
 
+/* Escape the description, then turn a "Phone: (xxx) xxx-xxxx" line into a
+   tappable tel: link. Escaping happens first so this can never inject markup. */
+function descHtml(desc) {
+  return esc(desc).replace(/(^|\n)Phone:\s*([0-9()+\-.\s]{7,})/g, function (m, lead, num) {
+    var digits = String(num).replace(/[^0-9+]/g, "");
+    return lead + 'Phone: <a href="tel:' + digits + '">' + num.trim() + "</a>";
+  });
+}
 function popupHtml(p) {
   var c = catColor(p[P_CAT]);
   var q = encodeURIComponent(p[P_NAME]);
-  return '<div><span class="pcat" style="background:' + c + '">' + catIcon(p[P_CAT]) + " " + esc(p[P_CAT]) + "</span>" +
+  return '<div><span class="pcat' + catExtraClass(p[P_CAT]) + '" style="background:' + c + '">' + catIcon(p[P_CAT]) + " " + esc(p[P_CAT]) + "</span>" +
     "<div><b>" + esc(p[P_NAME]) + "</b></div>" +
     (p[P_DATE] ? '<div style="font-size:11px;color:#789;">verified ' + esc(p[P_DATE]) + "</div>" : "") +
-    (p[P_DESC] ? '<div class="pdesc">' + esc(p[P_DESC]) + "</div>" : "") +
+    (p[P_DESC] ? '<div class="pdesc">' + descHtml(p[P_DESC]) + "</div>" : "") +
     '<div style="margin-top:6px;font-size:12px;">' + p[P_LAT].toFixed(5) + ", " + p[P_LNG].toFixed(5) +
     '<br><a target="_blank" rel="noopener" href="https://maps.apple.com/?ll=' + p[P_LAT] + "," + p[P_LNG] + "&q=" + q + '">Apple Maps</a>' +
     ' · <a target="_blank" rel="noopener" href="https://www.google.com/maps?q=' + p[P_LAT] + "," + p[P_LNG] + '">Google Maps</a></div></div>';
@@ -803,10 +830,20 @@ function loadCats() {
     if (raw) activeCats = new Set(JSON.parse(raw));
   } catch (e) { activeCats = null; }
 }
+/* Sidebar order: the three big camping categories first (they're what the app
+   is mainly for), then Planet Fitness, then everything else alphabetically.
+   Planet Fitness is a small category by count but wanted near the top. */
+var CAT_PINNED = ["Wild Camping", "Informal Campsite", "Established Campground", PF_CAT];
+function sortCats(cats) {
+  var pinned = [];
+  CAT_PINNED.forEach(function (p) { if (cats.indexOf(p) !== -1) pinned.push(p); });
+  var rest = cats.filter(function (c) { return CAT_PINNED.indexOf(c) === -1; }).sort();
+  return pinned.concat(rest);
+}
 function refreshSidebar() {
   var counts = {};
   places.forEach(function (p) { counts[p[P_CAT]] = (counts[p[P_CAT]] || 0) + 1; });
-  var cats = Object.keys(counts).sort();
+  var cats = sortCats(Object.keys(counts));
   var el = document.getElementById("catList");
   el.innerHTML = "";
   cats.forEach(function (c) {
@@ -814,7 +851,7 @@ function refreshSidebar() {
     row.className = "cat-row";
     var on = !activeCats || activeCats.has(c);
     row.innerHTML = '<input type="checkbox" ' + (on ? "checked" : "") + '>' +
-      '<span class="dot" style="background:' + catColor(c) + '">' + catIcon(c) + "</span>" +
+      '<span class="dot' + catExtraClass(c) + '" style="background:' + catColor(c) + '">' + catIcon(c) + "</span>" +
       "<span>" + esc(c) + '</span><span class="cnt">' + counts[c].toLocaleString() + "</span>";
     row.querySelector("input").addEventListener("change", function (e) {
       if (!activeCats) activeCats = new Set(cats);
@@ -826,8 +863,10 @@ function refreshSidebar() {
     el.appendChild(row);
   });
   updateMegaButtons();
+  var pfCount = counts[PF_CAT] || 0;
   document.getElementById("dataInfo").textContent =
-    places.length.toLocaleString() + " places bundled · " + DATA_VERSION + " · North, Central & South America";
+    places.length.toLocaleString() + " places bundled · " + DATA_VERSION + " · North, Central & South America" +
+    (pfCount ? " · " + pfCount.toLocaleString() + " Planet Fitness clubs updated " + PF_UPDATED : "");
 }
 function refreshAll() { rebuildGrid(); refreshSidebar(); renderMarkers(true); }
 
