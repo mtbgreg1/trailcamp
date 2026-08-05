@@ -562,7 +562,7 @@ addLocateCtl(mapGM);
 /* Escape the description, then turn a "Phone: (xxx) xxx-xxxx" line into a
    tappable tel: link. Escaping happens first so this can never inject markup. */
 function descHtml(desc) {
-  return esc(desc).replace(/(^|\n)Phone:\s*([0-9()+\-.\s]{7,})/g, function (m, lead, num) {
+    return esc(desc).replace(/(^|\n)Phone:[^\S\n]*([0-9()+\-.][0-9()+\-.\t ]{6,})/g, function (m, lead, num) {
     var digits = String(num).replace(/[^0-9+]/g, "");
     return lead + 'Phone: <a href="tel:' + digits + '">' + num.trim() + "</a>";
   });
