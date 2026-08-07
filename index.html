@@ -372,7 +372,8 @@ var PF_CAT = "Planet Fitness";
 var PF_UPDATED = "2026-08-04";
 var DATA_FILES = ["data/usa.json.gz", "data/canada.json.gz", "data/mexico.json.gz",
                   "data/camerica.json.gz", "data/samerica1.json.gz", "data/samerica2.json.gz",
-                  "data/planetfitness.json.gz"];
+                  "data/planetfitness.json.gz",
+                  "data/campgrounds.json.gz", "data/usfsdispersed.json.gz"];
 var VIEW_KEY = "tc_view_v1", CATS_KEY = "tc_cats_v1", POS_KEY = "tc_pos_v1";
 var P_NAME = 0, P_LAT = 1, P_LNG = 2, P_CAT = 3, P_DESC = 4, P_DATE = 5;
 
@@ -380,6 +381,8 @@ var CAT_COLORS = {
   "wild camping": "#2e8b57",
   "informal campsite": "#7cb342",
   "established campground": "#00796b",
+  "public campgrounds": "#00838f",
+  "usfs dispersed": "#33691e",
   "water": "#1976d2",
   "showers": "#8e24aa",
   "laundromat": "#ab47bc",
@@ -410,6 +413,8 @@ var CAT_ICONS = {
   "wild camping": "⛺",
   "informal campsite": "⛺",
   "established campground": "🏕️",
+  "public campgrounds": "🏕️",
+  "usfs dispersed": "⛺",
   "farm & vineyard camping": "🍇",
   "hotel": "🛏️",
   "hostel": "🏠",
@@ -834,6 +839,7 @@ function loadCats() {
    is mainly for), then Planet Fitness, then everything else alphabetically.
    Planet Fitness is a small category by count but wanted near the top. */
 var CAT_PINNED = ["Wild Camping", "Informal Campsite", "Established Campground",
+                  "Public Campgrounds", "USFS Dispersed",
                   PF_CAT, "Showers", "Water"];
 function sortCats(cats) {
   var pinned = [];
@@ -1327,7 +1333,8 @@ document.getElementById("filterBtn").addEventListener("click", function () {
 });
 document.getElementById("sidebarBackdrop").addEventListener("click", function () { setSidebar(false); });
 /* mega filters: campsites only / all POIs / no POIs */
-var CAMP_CATS = ["Wild Camping", "Informal Campsite", "Established Campground", "Farm & Vineyard Camping"];
+var CAMP_CATS = ["Wild Camping", "Informal Campsite", "Established Campground",
+                 "Public Campgrounds", "USFS Dispersed", "Farm & Vineyard Camping"];
 function allCatsInData() {
   var s = {};
   places.forEach(function (p) { s[p[P_CAT]] = 1; });

@@ -1,5 +1,5 @@
 /* Trailcamp service worker — bump VERSION whenever you update any file */
-var VERSION = "tc-v24";
+var VERSION = "tc-v25";
 var ASSETS = [
   "./",
   "./index.html",
@@ -21,7 +21,9 @@ var ASSETS = [
   "./data/camerica.json.gz",
   "./data/samerica1.json.gz",
   "./data/samerica2.json.gz",
-  "./data/planetfitness.json.gz"
+  "./data/planetfitness.json.gz",
+  "./data/campgrounds.json.gz",
+  "./data/usfsdispersed.json.gz"
 ];
 
 /* Fetch with cache:"reload" so install always stores what the server has now.
