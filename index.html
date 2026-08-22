@@ -160,6 +160,11 @@
   .leaflet-popup-content { font-size: 14px; margin: 10px 14px; }
   .leaflet-popup-content .pcat { display: inline-block; padding: 1px 7px; border-radius: 9px; color: #fff; font-size: 11px; margin-bottom: 4px; }
   .leaflet-popup-content .pdesc { max-height: 150px; overflow-y: auto; -webkit-overflow-scrolling: touch; white-space: pre-wrap; color: #445; }
+  /* ---- translated descriptions ---- */
+  .leaflet-popup-content .ptrans { font-size: 11px; color: #8794a0; margin-top: 3px; line-height: 1.5; }
+  .leaflet-popup-content .ptrans .tlink { color: #2f6fb0; cursor: pointer; border-bottom: 1px dotted #9fb4c6; }
+  .leaflet-popup-content .ptrans .tlink:active { opacity: .55; }
+  .leaflet-popup-content .porig { display: none; max-height: 130px; overflow-y: auto; -webkit-overflow-scrolling: touch; white-space: pre-wrap; color: #6b7580; font-size: 13px; margin-top: 4px; padding-top: 4px; border-top: 1px solid #e3e7ec; }
 
   /* ---- location typeahead ---- */
   .ac-list {
@@ -361,7 +366,9 @@
 "use strict";
 
 /* ---------------- state ----------------
-   places: array of compact records [name, lat, lng, category, desc, dateVerified] */
+   places: array of compact records [name, lat, lng, category, desc, dateVerified]
+   Non-English records carry two extra fields: [6] English translation, [7] source
+   language code (e.g. "pt"). Records already in English stay 6 long. */
 var places = [];
 var activeCats = null;               // Set of enabled categories (null = all)
 var DATA_VERSION = "iOverlander export 2026-07";
@@ -375,7 +382,8 @@ var DATA_FILES = ["data/usa.json.gz", "data/canada.json.gz", "data/mexico.json.g
                   "data/planetfitness.json.gz",
                   "data/campgrounds.json.gz", "data/usfsdispersed.json.gz"];
 var VIEW_KEY = "tc_view_v1", CATS_KEY = "tc_cats_v1", POS_KEY = "tc_pos_v1";
-var P_NAME = 0, P_LAT = 1, P_LNG = 2, P_CAT = 3, P_DESC = 4, P_DATE = 5;
+var P_NAME = 0, P_LAT = 1, P_LNG = 2, P_CAT = 3, P_DESC = 4, P_DATE = 5,
+    P_TDESC = 6, P_TLANG = 7;   // baked-in English translation + source language code
 
 var CAT_COLORS = {
   "wild camping": "#2e8b57",
@@ -564,6 +572,159 @@ addLocateCtl(mapMain);
 addLocateCtl(mapTF);
 addLocateCtl(mapGM);
 
+/* ---------------- description translation ----------------
+   Most iOverlander descriptions are English, but ~13% are not — overwhelmingly
+   Portuguese and Spanish in South America, and French in Quebec. Those records
+   carry a pre-translated English string at P_TDESC and the source language code
+   at P_TLANG, baked into the data files so they work with no signal. That
+   matters: the places whose descriptions are in Portuguese are exactly the
+   places with no cell service.
+
+   Anything without a baked translation (a record the build pass missed, or data
+   imported since) gets an on-demand "Translate" link that calls Google's keyless
+   gtx endpoint. It sends access-control-allow-origin:*, so a static site can
+   call it with no API key. It is unofficial — treat it as a bonus, not a
+   dependency, which is why the bundled translations exist. */
+
+var LANG_NAMES = {
+  es: "Spanish", pt: "Portuguese", fr: "French", de: "German", it: "Italian",
+  nl: "Dutch", ca: "Catalan", gl: "Galician", ru: "Russian", pl: "Polish",
+  sv: "Swedish", no: "Norwegian", da: "Danish", fi: "Finnish", cs: "Czech",
+  tr: "Turkish", he: "Hebrew", ar: "Arabic", zh: "Chinese", ja: "Japanese",
+  ko: "Korean", ro: "Romanian", hu: "Hungarian", el: "Greek", id: "Indonesian",
+  th: "Thai", vi: "Vietnamese", uk: "Ukrainian", hr: "Croatian", sl: "Slovenian",
+  af: "Afrikaans", et: "Estonian", lt: "Lithuanian", lv: "Latvian", sk: "Slovak"
+};
+function langName(c) { return LANG_NAMES[c] || (c ? String(c) : "another language"); }
+
+/* Popup HTML is rebuilt every time a pin is opened, so source text is parked in
+   this registry under a per-popup id rather than inlined into an onclick. */
+var TC_SRC = {}, TC_SEQ = 0;
+
+/* Cheap "is this probably not English?" test, used only to decide whether to
+   offer the Translate link. Deliberately strict — a false positive puts a
+   pointless link on an English popup. */
+var TR_EN_W = " the and is are was were with this that have has not from can there they will about very good place night stay free water road but all nice you your for our we us its on in at of to be been had did does what when where which who how why some any more most other than then them their here just also only over under out up down off again once both each few many much such no nor own same so too still even after before while during since until between into through above below across behind beside near next around along without within great easy right left north south east west lot spot site camp camping parking overnight quiet clean safe cheap nights showers toilet toilets bathroom shower price cost paid pay per day days people staff owner ";
+var TR_FW_W = " el la los las del que en un una es son para con por como pero muy este esta hay lugar noche agua camino gratis tiene puede esta mas bien todo aqui donde tranquilo seguro limpio barato estacionamiento acampar dormir banos ducha carretera playa rio montana pueblo ciudad noches dia dias gente dueno precio pagar o os as do da uma sao nao voce estrada gratuito banheiro banheiros chuveiro praia cidade vila dono preco otimo le les des dans une est sont pour avec comme tres ce cette il ne pas lieu nuit eau route gratuit peut plus tout ici ou nous aussi sans sur entre quand faire avoir vous bon bonne douche toilettes plage riviere montagne ville village nuits jour jours gens prix payer tranquille propre cher stationnement camper dormir endroit der die das und ist sind fur mit von im ein eine nicht auch sehr aber man kann hier gibt platz nacht wasser strasse kostenlos gut alle wir uns ohne uber zwischen bis wenn weil haben sie ihr dusche toiletten strand fluss berg stadt dorf nachte tag tage leute preis bezahlen ruhig sicher sauber billig parkplatz campen schlafen stellplatz ubernachten lo gli di che ma molto questo questa si posto notte strada puo bene qui dove anche tra fino perche voi buono buona doccia bagni spiaggia fiume citta paese notti giorno giorni prezzo pagare pagato pulito parcheggio campeggiare ";
+function looksForeign(t) {
+  if (!t) return false;
+  var w = String(t).toLowerCase().match(/[a-zàáâãäçèéêëìíîïñòóôõöùúûü']+/g);
+  if (!w || w.length < 4) return false;
+  var en = 0, fw = 0, i, x;
+  for (i = 0; i < w.length; i++) {
+    x = w[i];
+    if (TR_EN_W.indexOf(" " + x + " ") !== -1) en++;
+    /* strip accents so the ASCII word lists match accented source text */
+    var a = x.replace(/[àáâãä]/g, "a").replace(/[èéêë]/g, "e").replace(/[ìíîï]/g, "i")
+             .replace(/[òóôõö]/g, "o").replace(/[ùúûü]/g, "u").replace(/ç/g, "c").replace(/ñ/g, "n");
+    if (TR_FW_W.indexOf(" " + a + " ") !== -1) fw++;
+  }
+  /* Threshold of 3 (not 2) is deliberate: at 2, English addresses like
+     "El Camino Real" and "Del Rio" tripped the filter. Measured across 30,969
+     known-English descriptions, 3 gives zero false positives. */
+  return fw >= 3 && fw >= en;
+}
+
+/* localStorage cache for on-demand translations, capped so it can't grow
+   unbounded and blow the quota. Every access is wrapped — Safari throws on
+   localStorage in some private-browsing states. */
+var TR_CACHE_KEY = "tc_trans_v1", TR_CACHE_MAX = 400, trCache = null;
+function trKey(s) {
+  var h = 5381, i;
+  for (i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return h.toString(36) + "-" + s.length;
+}
+function trCacheLoad() {
+  if (trCache) return trCache;
+  try { trCache = JSON.parse(localStorage.getItem(TR_CACHE_KEY) || "{}"); }
+  catch (e) { trCache = {}; }
+  return trCache;
+}
+function trCacheGet(s) { var c = trCacheLoad(); return c[trKey(s)] || null; }
+function trCacheSet(s, v) {
+  var c = trCacheLoad(); c[trKey(s)] = v;
+  var k = Object.keys(c), i;
+  if (k.length > TR_CACHE_MAX) for (i = 0; i < k.length - TR_CACHE_MAX; i++) delete c[k[i]];
+  try { localStorage.setItem(TR_CACHE_KEY, JSON.stringify(c)); } catch (e) {}
+}
+
+/* The "translated from X · show original" footer, shared by baked-in and
+   on-demand translations so both look identical. */
+function transBar(id, lang) {
+  return 'translated from ' + esc(langName(lang)) +
+    ' · <span class="tlink" onclick="tcToggleOrig(\'' + id + '\')" id="' + id + 'k">show original</span>';
+}
+function tcToggleOrig(id) {
+  var o = document.getElementById(id + "o"), k = document.getElementById(id + "k");
+  if (!o || !k) return;
+  var hidden = o.style.display !== "block";
+  o.style.display = hidden ? "block" : "none";
+  k.innerHTML = hidden ? "hide original" : "show original";
+}
+
+/* Build the whole description block. English first, always; the original sits
+   underneath behind a link. */
+function descBlock(src, tr, lang) {
+  if (!src || !String(src).trim()) return "";
+  var id = "tc" + (++TC_SEQ);
+  TC_SRC[id] = src;
+  if (tr && tr !== src) {
+    return '<div class="pdesc" id="' + id + 'm">' + descHtml(tr) + "</div>" +
+      '<div class="ptrans" id="' + id + 'b">' + transBar(id, lang) + "</div>" +
+      '<div class="porig" id="' + id + 'o">' + descHtml(src) + "</div>";
+  }
+  var out = '<div class="pdesc" id="' + id + 'm">' + descHtml(src) + "</div>";
+  if (looksForeign(src)) {
+    out += '<div class="ptrans" id="' + id + 'b"><span class="tlink" onclick="tcTranslate(\'' +
+      id + '\')">Translate to English</span></div>' +
+      '<div class="porig" id="' + id + 'o">' + descHtml(src) + "</div>";
+  }
+  return out;
+}
+
+function tcApplyTranslation(id, t, lang) {
+  var m = document.getElementById(id + "m"), b = document.getElementById(id + "b");
+  if (!m || !b) return;
+  m.innerHTML = descHtml(t);
+  b.innerHTML = transBar(id, lang);
+}
+function tcTranslate(id) {
+  var src = TC_SRC[id];
+  var b = document.getElementById(id + "b");
+  if (!src || !b) return;
+  var hit = trCacheGet(src);
+  if (hit) { tcApplyTranslation(id, hit.t, hit.lang); return; }
+  if (navigator.onLine === false) {
+    b.innerHTML = 'Translating needs a connection.'; return;
+  }
+  b.innerHTML = "translating…";
+  var retry = ' <span class="tlink" onclick="tcTranslate(\'' + id + '\')">try again</span>';
+  var settled = false;
+  var timer = setTimeout(function () {
+    if (settled) return;
+    settled = true;
+    b.innerHTML = "Translation timed out." + retry;
+  }, 12000);
+  fetch("https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=" +
+        encodeURIComponent(src))
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error(r.status)); })
+    .then(function (j) {
+      if (settled) return;
+      settled = true; clearTimeout(timer);
+      var segs = (j && j[0]) || [], t = "", i;
+      for (i = 0; i < segs.length; i++) if (segs[i] && segs[i][0]) t += segs[i][0];
+      var lang = (j && j[2]) ? String(j[2]).split("-")[0] : "";
+      if (!t || lang === "en") { b.innerHTML = "Already in English."; return; }
+      trCacheSet(src, { t: t, lang: lang });
+      tcApplyTranslation(id, t, lang);
+    })
+    .catch(function () {
+      if (settled) return;
+      settled = true; clearTimeout(timer);
+      b.innerHTML = "Translation unavailable." + retry;
+    });
+}
+
 /* Escape the description, then turn a "Phone: (xxx) xxx-xxxx" line into a
    tappable tel: link. Escaping happens first so this can never inject markup. */
 function descHtml(desc) {
@@ -578,7 +739,7 @@ function popupHtml(p) {
   return '<div><span class="pcat' + catExtraClass(p[P_CAT]) + '" style="background:' + c + '">' + catIcon(p[P_CAT]) + " " + esc(p[P_CAT]) + "</span>" +
     "<div><b>" + esc(p[P_NAME]) + "</b></div>" +
     (p[P_DATE] ? '<div style="font-size:11px;color:#789;">verified ' + esc(p[P_DATE]) + "</div>" : "") +
-    (p[P_DESC] ? '<div class="pdesc">' + descHtml(p[P_DESC]) + "</div>" : "") +
+    descBlock(p[P_DESC], p[P_TDESC], p[P_TLANG]) +
     '<div style="margin-top:6px;font-size:12px;">' + p[P_LAT].toFixed(5) + ", " + p[P_LNG].toFixed(5) +
     '<br><a target="_blank" rel="noopener" href="https://maps.apple.com/?ll=' + p[P_LAT] + "," + p[P_LNG] + "&q=" + q + '">Apple Maps</a>' +
     ' · <a target="_blank" rel="noopener" href="https://www.google.com/maps?q=' + p[P_LAT] + "," + p[P_LNG] + '">Google Maps</a></div></div>';
