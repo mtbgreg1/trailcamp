@@ -86,6 +86,10 @@
      with the iOverlander category icons, and it stays legible at 26px. */
   .pin-ico.pf, .dot.pf, .pcat.pf { color: #F1EB43; font-weight: 800; letter-spacing: .3px; }
   .pin-ico.pf { font-size: 11px; }
+  /* Trailhead Parking: a white "P" in a blue circle, like Trailforks' icon */
+  .pin-ico.tp, .dot.tp, .pcat.tp { color: #fff; font-weight: 800; font-family: -apple-system, Helvetica, Arial, sans-serif; }
+  .pin-ico.tp { font-size: 14px; }
+  .dot.tp { font-size: 11px; }
   .dot.pf { font-size: 10px; }
   #dataInfo { font-size: 11px; color: #99a; margin-top: 14px; line-height: 1.5; }
 
@@ -331,7 +335,7 @@
         <div id="mapTF"></div>
         <div id="tfCrosshair">✛</div>
         <div id="tfLayersPanel">
-          <label><input type="checkbox" value="trail"> Trail heads</label>
+          <label><input type="checkbox" value="trail"> Trailhead parking</label>
           <label><input type="checkbox" value="labels" checked> Trail labels</label>
           <label><input type="checkbox" value="route"> Routes</label>
           <label><input type="checkbox" value="photo"> Photos</label>
@@ -377,13 +381,25 @@ var DATA_VERSION = "iOverlander export 2026-07";
    .json.gz is regenerated — it's shown in the sidebar so the age is visible. */
 var PF_CAT = "Planet Fitness";
 var PF_UPDATED = "2026-08-04";
+/* Trailhead Parking: every Trailforks POI of type Parking (rms icon "poi_2", all
+   activity types), worldwide. Trailforks' widget only draws POIs when zoomed
+   right in and can't show one POI type alone, so we bundle them as an ordinary
+   pin category. The file is compact rows [lat, lng, name, trailforksPoiId] plus
+   a 5th element 1 when Trailforks marks the POI closed (status 4); they are
+   expanded into normal place rows at load (see loadBundledData). Rebuild with
+   tools/tfparking/harvest.js and bump TH_UPDATED. */
+var TH_CAT = "Trailhead Parking";
+var TH_FILE = "data/tfparking.json.gz";
+var TH_UPDATED = "2026-10-12";
 var DATA_FILES = ["data/usa.json.gz", "data/canada.json.gz", "data/mexico.json.gz",
                   "data/camerica.json.gz", "data/samerica1.json.gz", "data/samerica2.json.gz",
                   "data/planetfitness.json.gz",
-                  "data/campgrounds.json.gz", "data/usfsdispersed.json.gz"];
+                  "data/campgrounds.json.gz", "data/usfsdispersed.json.gz",
+                  TH_FILE];
 var VIEW_KEY = "tc_view_v1", CATS_KEY = "tc_cats_v1", POS_KEY = "tc_pos_v1";
 var P_NAME = 0, P_LAT = 1, P_LNG = 2, P_CAT = 3, P_DESC = 4, P_DATE = 5,
-    P_TDESC = 6, P_TLANG = 7;   // baked-in English translation + source language code
+    P_TDESC = 6, P_TLANG = 7,
+    P_TFID = 8;                 // Trailforks POI id (Trailhead Parking rows only)   // baked-in English translation + source language code
 
 var CAT_COLORS = {
   "wild camping": "#2e8b57",
@@ -406,7 +422,8 @@ var CAT_COLORS = {
   "short-term parking": "#607d8b",
   "hotel": "#6a1b9a",
   "overnight prohibited": "#b71c1c",
-  "planet fitness": "#7B2D8E"
+  "planet fitness": "#7B2D8E",
+  "trailhead parking": "#1e88e5"
 };
 var PALETTE = ["#546e7a","#26a69a","#ef6c00","#5c6bc0","#9ccc65","#ec407a","#78909c","#7e57c2"];
 function catColor(cat) {
@@ -452,6 +469,7 @@ var CAT_ICONS = {
   "warning": "⚠️",
   "overnight prohibited": "🚫",
   "planet fitness": "PF",
+  "trailhead parking": "P",
   "other": "📍"
 };
 function catIcon(cat) {
@@ -460,7 +478,9 @@ function catIcon(cat) {
 /* Planet Fitness draws a "PF" monogram rather than an emoji glyph, so it needs
    the extra class that colours the text yellow. */
 function catExtraClass(cat) {
-  return (cat || "").toLowerCase() === "planet fitness" ? " pf" : "";
+  var k = (cat || "").toLowerCase();
+  if (k === "trailhead parking") return " tp";
+  return k === "planet fitness" ? " pf" : "";
 }
 /* cached L.divIcon per category */
 var iconCache = {};
@@ -493,7 +513,15 @@ function loadBundledData() {
       .then(function (buf) {
         var txt = pako.inflate(new Uint8Array(buf), { to: "string" });
         var arr = JSON.parse(txt);
-        for (var j = 0; j < arr.length; j++) places.push(arr[j]);
+        if (f === TH_FILE) {
+          for (var t = 0; t < arr.length; t++) {
+            var r = arr[t];
+            places.push([r[2] || "Parking", r[0], r[1], TH_CAT,
+                         r[4] ? "⚠️ Marked closed on Trailforks." : "", "", "", "", r[3]]);
+          }
+        } else {
+          for (var j = 0; j < arr.length; j++) places.push(arr[j]);
+        }
         i++;
         return next();
       });
@@ -742,7 +770,9 @@ function popupHtml(p) {
     descBlock(p[P_DESC], p[P_TDESC], p[P_TLANG]) +
     '<div style="margin-top:6px;font-size:12px;">' + p[P_LAT].toFixed(5) + ", " + p[P_LNG].toFixed(5) +
     '<br><a target="_blank" rel="noopener" href="https://maps.apple.com/?ll=' + p[P_LAT] + "," + p[P_LNG] + "&q=" + q + '">Apple Maps</a>' +
-    ' · <a target="_blank" rel="noopener" href="https://www.google.com/maps?q=' + p[P_LAT] + "," + p[P_LNG] + '">Google Maps</a></div></div>';
+    ' · <a target="_blank" rel="noopener" href="https://www.google.com/maps?q=' + p[P_LAT] + "," + p[P_LNG] + '">Google Maps</a>' +
+    (p[P_TFID] ? ' · <a target="_blank" rel="noopener" href="https://www.trailforks.com/poi/' + p[P_TFID] + '/">Trailforks</a>' : "") +
+    "</div></div>";
 }
 function esc(s) {
   return String(s || "").replace(/[&<>"]/g, function (c) {
@@ -1001,7 +1031,7 @@ function loadCats() {
    Planet Fitness is a small category by count but wanted near the top. */
 var CAT_PINNED = ["Wild Camping", "Informal Campsite", "Established Campground",
                   "Public Campgrounds", "USFS Dispersed",
-                  PF_CAT, "Showers", "Water"];
+                  TH_CAT, PF_CAT, "Showers", "Water"];
 function sortCats(cats) {
   var pinned = [];
   CAT_PINNED.forEach(function (p) { if (cats.indexOf(p) !== -1) pinned.push(p); });
@@ -1034,7 +1064,8 @@ function refreshSidebar() {
   var pfCount = counts[PF_CAT] || 0;
   document.getElementById("dataInfo").textContent =
     places.length.toLocaleString() + " places bundled · " + DATA_VERSION + " · North, Central & South America" +
-    (pfCount ? " · " + pfCount.toLocaleString() + " Planet Fitness clubs updated " + PF_UPDATED : "");
+    (pfCount ? " · " + pfCount.toLocaleString() + " Planet Fitness clubs updated " + PF_UPDATED : "") +
+    (counts[TH_CAT] ? " · " + counts[TH_CAT].toLocaleString() + " Trailforks trailhead parking spots (worldwide) updated " + TH_UPDATED : "");
 }
 function refreshAll() { rebuildGrid(); refreshSidebar(); renderMarkers(true); }
 
@@ -1085,7 +1116,9 @@ function tfWidgetUrl(c, z, wPx, hPx) {
   var maptype = document.getElementById("tfBasemap").value;
   var style = document.getElementById("tfTrailstyle").value || "difficulty";
   var act = document.getElementById("tfActivity").value || "1";
-  var layers = tfLayerBoxes().filter(function (b) { return b.checked; })
+  // "trail" is Trailcamp's Trailhead Parking pin category (see TH_CAT), not the
+  // widget's "Trail heads" layer, which marks the start of every trail segment.
+  var layers = tfLayerBoxes().filter(function (b) { return b.checked && b.value !== "trail"; })
     .map(function (b) { return b.value; }).join(",");
   var common = "&activitytype=" + act + "&trailstyle=" + style + "&controls=1&dml=1" +
     "&maptype=" + maptype + "&layers=" + layers +
@@ -1117,6 +1150,7 @@ document.getElementById("tfLayersBtn").addEventListener("click", function () {
   document.getElementById("tfLayersPanel").classList.toggle("open");
 });
 tfLayerBoxes().forEach(function (b) {
+  if (b.value === "trail") return;   // Trailhead Parking pins: handled by syncThBox(), no widget reload
   b.addEventListener("change", function () { saveTfPrefs(); syncTF(true); });
 });
 try {
@@ -1508,10 +1542,23 @@ function updateMegaButtons() {
     isCamps = true;
     activeCats.forEach(function (c) { if (CAMP_CATS.indexOf(c) === -1) isCamps = false; });
   }
+  syncThBox();
   document.getElementById("megaAll").classList.toggle("on", !activeCats);
   document.getElementById("megaCamps").classList.toggle("on", isCamps);
   document.getElementById("megaNone").classList.toggle("on", !!isNone);
 }
+/* The Trailforks Layers ▾ "Trailhead parking" box is a shortcut for the
+   Trailhead Parking category filter — one setting, two places to flip it. */
+function thBox() { return document.querySelector('#tfLayersPanel input[value="trail"]'); }
+function syncThBox() {
+  var b = thBox();
+  if (b) b.checked = !activeCats || activeCats.has(TH_CAT);
+}
+if (thBox()) thBox().addEventListener("change", function () {
+  if (!activeCats) activeCats = new Set(allCatsInData());
+  if (this.checked) activeCats.add(TH_CAT); else activeCats.delete(TH_CAT);
+  saveCats(); refreshSidebar(); renderMarkers(true);
+});
 document.getElementById("megaCamps").addEventListener("click", function () {
   activeCats = new Set(allCatsInData().filter(function (c) { return CAMP_CATS.indexOf(c) !== -1; }));
   saveCats(); refreshSidebar(); renderMarkers(true);
@@ -1985,6 +2032,14 @@ if ("serviceWorker" in navigator) {
 
 /* ---------------- boot ---------------- */
 loadCats();
+/* A saved filter set predates Trailhead Parking, so it would start hidden.
+   Turn it on once; after that the user's choice sticks. */
+try {
+  if (!localStorage.getItem("tc_th_init_v1")) {
+    if (activeCats) { activeCats.add(TH_CAT); saveCats(); }
+    localStorage.setItem("tc_th_init_v1", "1");
+  }
+} catch (e) {}
 loadBundledData().then(function () {
   setLoad("Rendering…", 1);
   try {
