@@ -399,7 +399,14 @@ var DATA_FILES = ["data/usa.json.gz", "data/canada.json.gz", "data/mexico.json.g
 var VIEW_KEY = "tc_view_v1", CATS_KEY = "tc_cats_v1", POS_KEY = "tc_pos_v1";
 var P_NAME = 0, P_LAT = 1, P_LNG = 2, P_CAT = 3, P_DESC = 4, P_DATE = 5,
     P_TDESC = 6, P_TLANG = 7,
-    P_TFID = 8;                 // Trailforks POI id (Trailhead Parking rows only)   // baked-in English translation + source language code
+    P_TFID = 8,                 // Trailforks POI id (Trailhead Parking rows only)
+    P_IOID = 9;                 // iOverlander listing GUID (iOverlander rows only)
+/* [6]/[7] are the baked-in English translation + source language code.
+   iOverlander rows that have a listing GUID carry it at [9]; slots they don't
+   use in between are padded with 0 (falsy), so a 6-field row becomes
+   [.., 0, 0, 0, guid]. The GUID links to ioverlander.com/places/<guid>, which
+   iOverlander registers as an iOS universal link: it opens the iOverlander app
+   when installed, the website otherwise (website needs you to be signed in). */
 
 var CAT_COLORS = {
   "wild camping": "#2e8b57",
@@ -772,6 +779,7 @@ function popupHtml(p) {
     '<br><a target="_blank" rel="noopener" href="https://maps.apple.com/?ll=' + p[P_LAT] + "," + p[P_LNG] + "&q=" + q + '">Apple Maps</a>' +
     ' · <a target="_blank" rel="noopener" href="https://www.google.com/maps?q=' + p[P_LAT] + "," + p[P_LNG] + '">Google Maps</a>' +
     (p[P_TFID] ? ' · <a target="_blank" rel="noopener" href="https://www.trailforks.com/poi/' + p[P_TFID] + '/">Trailforks</a>' : "") +
+    (p[P_IOID] ? ' · <a target="_blank" rel="noopener" href="https://ioverlander.com/places/' + encodeURIComponent(p[P_IOID]) + '">iOverlander</a>' : "") +
     "</div></div>";
 }
 function esc(s) {
